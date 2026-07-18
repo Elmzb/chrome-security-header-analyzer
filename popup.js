@@ -115,19 +115,26 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
 // ---------------------------------------------------------------------------
 async function analyze(url) {
   try {
-    // We request the page ourselves. Because the manifest grants
-    // host_permissions for all URLs, the browser lets us read the full set
-    // of response headers (something ordinary web pages are not allowed to do).
+    // We request the page ourselves. The "activeTab" permission gives us
+    // temporary access to the tab you just clicked from, which lets us read
+    // the full set of response headers (something ordinary web pages can't do)
+    // WITHOUT the extension holding standing access to every website.
     //
-    // - method "GET": a normal request. Most reliable across servers.
+    // We try a "HEAD" request first: it asks the server for ONLY the headers,
+    // not the page body. That means we pull less data and never download a
+    // potentially large or hostile response body just to read its headers.
+    //
     // - redirect "follow": if the site redirects (e.g. http -> https),
     //   follow it so we check the page you actually end up on.
     // - cache "no-store": don't use a saved copy; get the real, live headers.
-    const response = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      cache: "no-store",
-    });
+    const options = { redirect: "follow", cache: "no-store" };
+    let response = await fetch(url, { method: "HEAD", ...options });
+
+    // Some servers don't support HEAD and answer with an error. If that
+    // happens, fall back to a normal GET so the tool still works everywhere.
+    if (!response.ok) {
+      response = await fetch(url, { method: "GET", ...options });
+    }
 
     // response.headers is a lookup table of everything the server sent back.
     // For each header we care about, figure out three things:
@@ -219,7 +226,13 @@ function drawRow(header, status, value, note) {
   if (value !== null) {
     const valueEl = document.createElement("p");
     valueEl.className = "result-value";
-    valueEl.textContent = value;
+    // Cap very long values so a site can't bloat the popup with a huge string.
+    // (textContent already blocks code injection; this just keeps it tidy.)
+    const MAX_LENGTH = 300;
+    valueEl.textContent =
+      value.length > MAX_LENGTH
+        ? value.slice(0, MAX_LENGTH) + "… (truncated)"
+        : value;
     li.appendChild(valueEl);
   }
 
