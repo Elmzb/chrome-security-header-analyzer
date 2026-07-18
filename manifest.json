@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Security Header Analyzer",
+  "version": "1.0.0",
+  "description": "Checks the current website for important HTTP security headers and explains what each one protects against.",
+
+  "permissions": [
+    "activeTab"
+  ],
+
+  "host_permissions": [
+    "<all_urls>"
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Analyze security headers"
+  }
+}

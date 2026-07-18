@@ -1,0 +1,13 @@
+# macOS folder metadata
+.DS_Store
+
+# Editor / IDE settings
+.vscode/
+.idea/
+
+# Claude Code local settings (not part of the extension)
+.claude/
+
+# Logs and OS clutter
+*.log
+Thumbs.db

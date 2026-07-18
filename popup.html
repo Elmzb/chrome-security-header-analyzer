@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Load our styles and, at the end of the body, our logic. -->
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <h1>Security Header Analyzer</h1>
+
+  <!-- Shows which site we're inspecting. Filled in by popup.js. -->
+  <p id="site" class="site">Checking current tab…</p>
+
+  <!-- The results list. popup.js builds a row here for each header. -->
+  <ul id="results" class="results"></ul>
+
+  <!-- A small footer note that can show errors or a summary. -->
+  <p id="status" class="status"></p>
+
+  <!--
+    We load the script at the very END of the body so that all the
+    HTML elements above already exist by the time the script runs
+    and tries to find them.
+  -->
+  <script src="popup.js"></script>
+</body>
+</html>
