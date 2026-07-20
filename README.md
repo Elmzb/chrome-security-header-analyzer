@@ -1,120 +1,127 @@
-# Security Header Analyzer
+# Security Audit Dashboard 🛡️
 
-A Chrome extension (Manifest V3) that shows you the **real** HTTP security
-headers your browser received for the page you're on, grades them, and explains
-in plain English what each one protects against — and how to fix the weak ones.
+A Chrome extension (Manifest V3) that turns any website into a plain-English
+**security audit** — and quietly **shields** you while you browse.
 
-Unlike tools that re-request the page, this extension reads the headers your
-browser *actually got*, so the report matches what you really loaded (including
-logged-in pages and redirects).
+It reads the **real** data your browser received (never a second, made-up
+request), grades it, and explains what each finding means and how to fix it.
+It also **auto-rejects cookie-consent banners** so you're not tracked by default.
 
-## What it checks
+> **Two views:** click the toolbar icon for a quick popup with the overall
+> grade; hit **"Open full audit ↗"** for the full-page dashboard.
 
-| Header | Protects against | Graded on |
-| --- | --- | --- |
-| Content-Security-Policy (CSP) | Cross-site scripting (XSS) | `unsafe-inline` / `unsafe-eval` / broad sources, with credit for nonces, hashes, and `strict-dynamic` |
-| Strict-Transport-Security (HSTS) | HTTPS downgrade / eavesdropping | `max-age` length, `includeSubDomains`, `preload` |
-| X-Frame-Options | Clickjacking | `DENY` / `SAMEORIGIN`; flags deprecated `ALLOW-FROM` |
-| X-Content-Type-Options | MIME-type sniffing | must be exactly `nosniff` |
-| Referrer-Policy | Leaking sensitive URLs | flags leaky policies like `unsafe-url` |
-| Permissions-Policy | Misuse of camera, mic, location, etc. | presence |
-| Cross-Origin-Opener-Policy (COOP) | Cross-window snooping | flags `unsafe-none` |
-| Cross-Origin-Embedder-Policy (COEP) | Un-isolated embedding | flags `unsafe-none` |
-| Cross-Origin-Resource-Policy (CORP) | Cross-site resource leaks | notes overly-open `cross-origin` |
+---
 
-Each result gets a color-coded badge — **PRESENT** (green), **OK** (green, e.g.
-protection provided by another header), **WEAK** (yellow), or **MISSING** (red) —
-plus the header's real value, specific notes, and a "Learn more" link. At the top
-you get an overall **A–F letter grade** and a summary, and a **Copy report**
-button for sharing the results as text.
+## What it does
 
-Smart touches:
+### 🔍 Audit
+| Area | What's checked |
+| --- | --- |
+| **Security headers** | CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, COOP, COEP, CORP — each graded, with fixes and "Learn more" links |
+| **CSP, directive by directive** | Every directive (`script-src`, `object-src`, `frame-ancestors`, …) graded on its own; flags `unsafe-inline`/`unsafe-eval`/broad sources and recommends missing directives |
+| **Cookies** | Flags cookies missing **Secure**, **HttpOnly**, or a safe **SameSite** — cookie *values* are never read or shown |
+| **Connection / TLS** | HTTPS vs HTTP, protocol version, server IP, HSTS status (honest that Chrome doesn't expose cert/cipher to extensions) |
+| **Tech stack** | Detects CMS / framework / analytics / server from fingerprint headers *and* page markers (WordPress, Shopify, Next.js, Cloudflare, GTM, …) |
 
-- If CSP sets `frame-ancestors`, X-Frame-Options is marked **OK** (already covered).
-- `unsafe-inline` isn't flagged when a nonce/hash or `strict-dynamic` neutralizes it.
-- Multiple copies of the same header are detected and noted.
+Everything rolls up into a single weighted **A–F grade**
+(**Headers 50% · Transport 20% · Cookies 30%**), with a per-dimension breakdown
+so you see *why*. Export the whole report as **HTML**, **JSON**, or copy it as text.
+
+### 🛡️ Shield
+- **Auto-reject cookie banners** — recognises 14 major consent platforms
+  (OneTrust, Cookiebot, Didomi, Quantcast, Usercentrics, Sourcepoint, …) plus a
+  multilingual generic fallback. Runs in every frame, pierces shadow DOM, and
+  clicks "Reject all / Only necessary" for you. A green **✓** badge shows when it
+  fires. Toggle it off anytime in the popup.
+
+---
 
 ## How it works
 
 ```
-┌────────────┐   page loads    ┌──────────────────┐   saves headers   ┌───────────────┐
-│  website   │ ──────────────▶ │  background.js    │ ────────────────▶ │ session store │
-└────────────┘  (main frame)   │ (service worker)  │   per tab, in RAM └───────┬───────┘
-                               └──────────────────┘                            │ reads
-                                                                       ┌────────▼───────┐
-                                                        you click icon │   popup.js     │
-                                                                       │ grades + draws │
-                                                                       └────────────────┘
+┌──────────┐  page loads   ┌──────────────────┐  saves per tab   ┌───────────────┐
+│ website  │ ────────────▶ │   background.js   │ ───────────────▶ │ session store │
+└────┬─────┘ (main frame)  │ (service worker)  │  (in-memory RAM) └───────┬───────┘
+     │                     └──────────────────┘                          │ reads
+     │ content scripts run inside the page:                      ┌────────▼────────┐
+     │  • consent.js  → auto-rejects the cookie banner           │ popup / dashboard│
+     │  • tech.js     → detects the tech stack from the DOM      │  grade + render  │
+     └───────────────────────────────────────────────────────── │  (analysis.js)   │
+                                                                 └─────────────────┘
 ```
 
-`background.js` quietly watches each page's main response and saves only the
-security-related headers for that tab into `chrome.storage.session` (in-memory;
-wiped when you close Chrome, never written to disk). When you click the icon,
-`popup.js` reads what was saved, grades it, and draws the report. No second
-network request is ever made.
+- **`background.js`** watches each page's main response, saving only the
+  security + fingerprint headers (and server IP/protocol) for that tab into
+  `chrome.storage.session` — in-memory, wiped when Chrome closes, never on disk.
+- **`analysis.js`** is the shared "engine": pure grading logic with **no DOM**,
+  so it's unit-testable. Both the popup and dashboard import it, so their
+  grades always agree.
+- **`popup.js` / `dashboard.js`** just read the saved data and draw it.
+- **`consent.js` / `tech.js`** are content scripts that run inside pages; they
+  report back to the background worker via messages.
+
+No second network request is ever made — the audit reflects exactly what your
+browser really loaded (including logged-in pages and redirects).
+
+---
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `manifest.json` | Extension metadata, permissions, icons |
-| `background.js` | Service worker: records the real response headers per tab |
-| `popup.html` | The popup window's structure |
-| `popup.css` | Styling (light + dark mode) |
-| `popup.js` | Logic: reads saved headers, grades them, renders the report |
+| `manifest.json` | Metadata, permissions, content-script registration, icons |
+| `background.js` | Service worker: records real headers / connection info per tab; receives consent + tech reports |
+| `analysis.js` | Shared engine: grading, scoring, and report builders (no DOM) |
+| `popup.html/.css/.js` | The compact popup (quick grade + shield toggle) |
+| `dashboard.html/.css/.js` | The full-page audit dashboard |
+| `consent-rules.js` | Knowledge base of consent platforms + reject-label matcher |
+| `consent.js` | Content script: the cookie-banner auto-rejecter engine |
+| `tech.js` | Content script: tech-stack detection from the page's DOM |
 | `icons/` | Toolbar/store icons (16, 32, 48, 128 px) |
+| `dev-server.py` / `dev-reload.js` | Optional live-reload helpers for development |
 
-## Permissions
+---
 
-- `webRequest` + `host_permissions: <all_urls>` — needed to observe the response
-  headers of the pages you load. Chrome shows this as "read your browsing history"
-  and "read and change your data on all websites." The extension only ever *reads*
-  headers; it never changes requests or responses, and never sends anything
-  anywhere.
-- `storage` — to keep the captured headers in private, in-memory session storage.
+## Permissions & privacy
 
-The extension has **no content scripts** and makes **no network requests of its
-own**. It only reads response headers locally, on your machine.
+- `webRequest` + `host_permissions: <all_urls>` — to observe the response
+  headers of the pages you load. The extension only ever **reads** headers; it
+  never modifies requests or responses.
+- `cookies` — to read cookie **flags** (Secure/HttpOnly/SameSite). Cookie
+  **values are never read or shown**.
+- `storage` — keeps captured data in private, in-memory session storage.
+- **Content scripts** (`consent.js`, `tech.js`) run inside pages to reject
+  consent banners and read public page markers. They read no personal data, no
+  page content, and no cookie values, and send nothing off your machine.
+
+Nothing the extension collects ever leaves your computer.
+
+---
 
 ## Install (developer mode)
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top-right).
 3. Click **Load unpacked** and select this folder.
-4. Pin the icon, open any `http`/`https` site, and click it.
+4. Pin the icon, open any `http`/`https` site, reload it once, and click the icon.
 
-> First run tip: pages already open before you installed the extension have no
-> captured headers yet. The popup will offer a **Reload page & analyze** button —
-> click it and the report appears automatically. (The same applies to pages
-> restored from the browser's back/forward cache.)
+> First-run tip: pages open *before* you installed the extension have no captured
+> data yet — the popup offers a **Reload page & analyze** button.
+
+---
 
 ## Live reload while developing (optional)
 
-So you don't have to keep clicking "reload" on `chrome://extensions` every time
-you edit a file, there's a tiny built-in auto-reloader.
+So you don't have to keep clicking reload on `chrome://extensions`:
 
-1. In a terminal, from this folder, start the watcher:
-   ```
-   python3 dev-server.py
-   ```
-   (Only Python 3 is needed — no installs. Stop it with Ctrl+C. Use a different
-   port with `PORT=6000 python3 dev-server.py`.)
-2. Load/reload the extension once in Chrome.
-3. Now just **edit and save**. The extension reloads itself automatically:
-   - Edits to `popup.*` show up when you next open the popup (no reload needed).
-   - Edits to `background.js`/`manifest.json` trigger a full extension reload
-     within about a second.
+```
+python3 dev-server.py
+```
 
-How it works: `dev-server.py` serves a token that changes when any source file
-is saved; `dev-reload.js` (loaded by the service worker) watches that token and
-calls `chrome.runtime.reload()` on a change. It uses no extra permissions.
+Then just edit and save — the extension reloads itself within a second.
+**Before publishing**, delete `dev-reload.js` and `dev-server.py`.
 
-There's also a manual fallback: press **Alt+Shift+R** (Option+Shift+R on macOS)
-to reload the extension any time, even without the watcher running.
-
-**Before publishing**, delete `dev-reload.js` and `dev-server.py` (and, if you
-like, the `commands` block in `manifest.json`). The service worker loads
-`dev-reload.js` inside a `try/catch`, so its absence is a harmless no-op.
+---
 
 ## License
 
