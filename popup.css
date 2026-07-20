@@ -1,272 +1,229 @@
-/* ---------------------------------------------------------------------------
-   Colors are defined once here as "custom properties" (variables). The block
-   under @media (prefers-color-scheme: dark) swaps them for dark mode, so the
-   rest of the stylesheet doesn't need to know which theme is active.
---------------------------------------------------------------------------- */
+/* popup.css — the compact popup. Clean, modern "security dashboard" look.
+   Every color is a CSS variable, so switching to dark mode just swaps the
+   palette below and the rest of the stylesheet follows automatically.
+   (No color-mix() etc. is used, to stay compatible with older Chrome.) */
+
 :root {
-  --bg: #ffffff;
-  --fg: #1a1a1a;
-  --muted: #5a5a5a;
-  --card-bg: #ffffff;
-  --card-border: #e5e5e5;
-  --value-bg: #f5f5f5;
-  --value-fg: #333333;
+  --bg: #f7f8fb;
+  --surface: #ffffff;
+  --fg: #0f172a;
+  --muted: #64748b;
+  --border: #e6e8ef;
+  --value-bg: #f1f3f9;
+  --value-fg: #334155;
 
-  --present-bg: #e3f6e8;
-  --present-fg: #1a7f37;
-  --weak-bg: #fdf3e0;
-  --weak-fg: #a76a00;
-  --missing-bg: #fdeaea;
-  --missing-fg: #c0392b;
+  --present-bg: #e7f7ee; --present-fg: #12813c;
+  --covered-bg: #e7f7ee; --covered-fg: #12813c;
+  --weak-bg:    #fdf1e1; --weak-fg:    #b45309;
+  --missing-bg: #fdecec; --missing-fg: #c62f2f;
 
-  --accent: #2f80ed;
-  --good: #1a7f37;
-  --bad: #c0392b;
-  --tip: #6b6b6b;
+  --accent: #6366f1;         /* indigo */
+  --accent-2: #22d3ee;       /* cyan — used for gradients */
+  --accent-soft: #eceefe;    /* faint accent fill for hovers */
+  --hover-border: #c9ccf6;
+
+  --good: #12813c;
+  --bad: #c62f2f;
+  --tip: #64748b;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 6px 18px rgba(15, 23, 42, 0.09);
+  --radius: 12px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1e1f22;
-    --fg: #ececec;
-    --muted: #a0a0a0;
-    --card-bg: #26272b;
-    --card-border: #3a3b40;
-    --value-bg: #1a1b1e;
-    --value-fg: #d6d6d6;
+    --bg: #0b1120;
+    --surface: #141b2d;
+    --fg: #e8ecf4;
+    --muted: #93a1b8;
+    --border: #243049;
+    --value-bg: #0e1526;
+    --value-fg: #cbd5e1;
 
-    --present-bg: #143d22;
-    --present-fg: #67d98b;
-    --weak-bg: #40320f;
-    --weak-fg: #f0c66b;
-    --missing-bg: #431a1a;
-    --missing-fg: #f08a80;
+    --present-bg: #10331f; --present-fg: #4ade80;
+    --covered-bg: #10331f; --covered-fg: #4ade80;
+    --weak-bg:    #3a2a0e; --weak-fg:    #fbbf24;
+    --missing-bg: #3a1717; --missing-fg: #f87171;
 
-    --accent: #5b9bff;
-    --good: #67d98b;
-    --bad: #f08a80;
-    --tip: #9a9a9a;
+    --accent: #818cf8;
+    --accent-2: #22d3ee;
+    --accent-soft: #1b2340;
+    --hover-border: #3b4576;
+
+    --good: #4ade80;
+    --bad: #f87171;
+    --tip: #93a1b8;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 10px 26px rgba(0, 0, 0, 0.45);
   }
 }
 
-/* The popup is a small window, so we give it a fixed, comfortable width. */
+* { box-sizing: border-box; }
+
 body {
   width: 380px;
   margin: 0;
-  padding: 0 0 12px;
+  padding: 0 0 14px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--fg);
   background: var(--bg);
+  -webkit-font-smoothing: antialiased;
 }
 
-/* ---- Top bar -------------------------------------------------------------- */
+/* ---- Top bar (with a subtle gradient underline) --------------------------- */
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--card-border);
-  position: sticky;
-  top: 0;
-  background: var(--bg);
-  z-index: 1;
+  padding: 13px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
-
-.topbar-title {
-  font-size: 14px;
-  font-weight: 700;
+.topbar::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
 }
-
-/* The group of buttons on the right of the top bar. */
-.topbar-actions {
-  display: flex;
-  gap: 8px;
-}
+.topbar-title { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
+.topbar-actions { display: flex; gap: 6px; }
 
 /* ---- Buttons -------------------------------------------------------------- */
 .ghost-btn {
   font: inherit;
   font-size: 12px;
+  font-weight: 600;
   color: var(--accent);
   background: transparent;
-  border: 1px solid var(--card-border);
-  border-radius: 6px;
-  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 10px;
   cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.05s;
 }
-.ghost-btn:hover {
-  border-color: var(--accent);
-}
+.ghost-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
+.ghost-btn:active { transform: translateY(1px); }
 
 .primary-btn {
   font: inherit;
   font-size: 13px;
   font-weight: 600;
   color: #ffffff;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
   border: none;
-  border-radius: 8px;
-  padding: 10px 14px;
+  border-radius: 10px;
+  padding: 11px 14px;
   cursor: pointer;
   width: 100%;
+  box-shadow: var(--shadow-sm);
+  transition: filter 0.15s, transform 0.05s;
 }
-.primary-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
+.primary-btn:hover { filter: brightness(1.06); }
+.primary-btn:active { transform: translateY(1px); }
+.primary-btn:disabled { opacity: 0.6; cursor: default; filter: none; }
 
 /* ---- Overview (grade + site) --------------------------------------------- */
 .overview {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 14px 16px;
+  padding: 16px;
 }
 
-/* The big round letter grade. Its color comes from a grade-* class set in JS. */
+/* The big round letter grade. A gradient + soft glow set per grade in JS. */
 .grade {
   flex: 0 0 auto;
-  width: 56px;
-  height: 56px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 26px;
+  font-size: 27px;
   font-weight: 800;
   color: #ffffff;
   background: var(--muted);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
-.grade.grade-a { background: #1a7f37; }
-.grade.grade-b { background: #4c9a2a; }
-.grade.grade-c { background: #c9a227; }
-.grade.grade-d { background: #d97706; }
-.grade.grade-f { background: #c0392b; }
+.grade.grade-a { background: linear-gradient(135deg, #16a34a, #22c55e); box-shadow: 0 6px 18px rgba(34, 197, 94, 0.40),  inset 0 0 0 1px rgba(255,255,255,0.2); }
+.grade.grade-b { background: linear-gradient(135deg, #4d9a1e, #84cc16); box-shadow: 0 6px 18px rgba(132, 204, 22, 0.38), inset 0 0 0 1px rgba(255,255,255,0.2); }
+.grade.grade-c { background: linear-gradient(135deg, #ca8a04, #eab308); box-shadow: 0 6px 18px rgba(234, 179, 8, 0.38),  inset 0 0 0 1px rgba(255,255,255,0.2); }
+.grade.grade-d { background: linear-gradient(135deg, #ea580c, #f97316); box-shadow: 0 6px 18px rgba(249, 115, 22, 0.38), inset 0 0 0 1px rgba(255,255,255,0.2); }
+.grade.grade-f { background: linear-gradient(135deg, #dc2626, #ef4444); box-shadow: 0 6px 18px rgba(239, 68, 68, 0.40),  inset 0 0 0 1px rgba(255,255,255,0.2); }
 
-.overview-text {
-  min-width: 0; /* lets long URLs shrink/wrap instead of overflowing */
-}
+.overview-text { min-width: 0; }
+.site { font-size: 12.5px; font-weight: 700; margin: 0 0 3px; word-break: break-all; letter-spacing: -0.01em; }
+.meta { font-size: 11px; color: var(--muted); margin: 0; }
 
-.site {
-  font-size: 12px;
-  font-weight: 600;
-  margin: 0 0 2px;
-  word-break: break-all;
-}
-
-.meta {
-  font-size: 11px;
-  color: var(--muted);
-  margin: 0;
-}
-
-/* ---- Results list --------------------------------------------------------- */
-.results {
-  list-style: none;
-  margin: 0;
-  padding: 0 16px;
-}
+/* ---- Results -------------------------------------------------------------- */
+.results { list-style: none; margin: 0; padding: 0 16px; }
 
 .result {
-  border: 1px solid var(--card-border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
-  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  margin-bottom: 9px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s, transform 0.08s, border-color 0.15s;
+}
+.result:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--hover-border);
+  transform: translateY(-1px);
 }
 
-.result-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 13px;
-}
+.result-head { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 13px; }
+.result-name { flex: 1; min-width: 0; }
 
-.result-name {
-  flex: 1;
-  min-width: 0;
-}
-
-/* The little colored status badge. */
 .badge {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  padding: 2px 8px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 8px;
   border-radius: 999px;
   white-space: nowrap;
 }
 .badge.present { background: var(--present-bg); color: var(--present-fg); }
-.badge.covered { background: var(--present-bg); color: var(--present-fg); }
+.badge.covered { background: var(--covered-bg); color: var(--covered-fg); }
 .badge.weak    { background: var(--weak-bg);    color: var(--weak-fg); }
 .badge.missing { background: var(--missing-bg); color: var(--missing-fg); }
 
-.result-desc {
-  font-size: 12px;
-  color: var(--muted);
-  margin: 6px 0 0;
-  line-height: 1.45;
-}
+.result-desc { font-size: 12px; color: var(--muted); margin: 7px 0 0; line-height: 1.5; }
 
-/* The header's actual value, in monospace. Scrolls if a policy is very long. */
 .result-value {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   color: var(--value-fg);
   background: var(--value-bg);
-  border-radius: 6px;
-  padding: 6px 8px;
-  margin: 6px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 9px;
+  margin: 8px 0 0;
   word-break: break-all;
   white-space: pre-wrap;
   max-height: 120px;
   overflow: auto;
 }
 
-/* Notes under a card: good (green), bad (red), or tip (grey). */
-.notes {
-  list-style: none;
-  margin: 6px 0 0;
-  padding: 0;
-}
-.note {
-  font-size: 11.5px;
-  line-height: 1.45;
-  margin: 3px 0 0;
-  padding-left: 16px;
-  text-indent: -16px;
-}
-.note::before {
-  display: inline-block;
-  width: 16px;
-  text-indent: 0;
-}
-.note.good { color: var(--good); }
-.note.good::before { content: "✓ "; }
-.note.bad { color: var(--bad); }
-.note.bad::before { content: "✕ "; }
-.note.tip { color: var(--tip); }
-.note.tip::before { content: "→ "; }
+.notes { list-style: none; margin: 8px 0 0; padding: 0; }
+.note { font-size: 11.5px; line-height: 1.5; margin: 3px 0 0; padding-left: 18px; text-indent: -18px; }
+.note::before { display: inline-block; width: 18px; text-indent: 0; font-weight: 700; }
+.note.good { color: var(--good); } .note.good::before { content: "✓ "; }
+.note.bad  { color: var(--bad); }  .note.bad::before  { content: "✕ "; }
+.note.tip  { color: var(--tip); }  .note.tip::before  { content: "→ "; }
 
-.learn-more {
-  display: inline-block;
-  font-size: 11px;
-  margin-top: 8px;
-  color: var(--accent);
-  text-decoration: none;
-}
+.learn-more { display: inline-block; font-size: 11px; font-weight: 600; margin-top: 9px; color: var(--accent); text-decoration: none; }
 .learn-more:hover { text-decoration: underline; }
 
 /* ---- Status + actions ----------------------------------------------------- */
-.status {
-  font-size: 12px;
-  color: var(--muted);
-  margin: 12px 16px 0;
-  line-height: 1.45;
-}
-
-.actions {
-  padding: 4px 16px 0;
-}
+.status { font-size: 12px; color: var(--muted); margin: 12px 16px 0; line-height: 1.5; }
+.actions { padding: 6px 16px 0; }
