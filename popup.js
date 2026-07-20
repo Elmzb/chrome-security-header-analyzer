@@ -1,249 +1,265 @@
-// popup.js
-// This script runs every time you open the popup. Its job is:
-//   1. Figure out which website you're currently on.
-//   2. Ask that website for its HTTP response headers.
-//   3. Check whether each important security header is present.
-//   4. Draw a result row for each header, with a plain-English explanation.
+// popup.js — the small popup you get when you click the toolbar icon.
+//
+// It:
+//   1. Finds the tab you're looking at.
+//   2. Reads the real headers the background worker saved for that tab.
+//   3. Uses the shared analysis engine (analysis.js) to grade them.
+//   4. Draws a compact report, an overall letter grade, and buttons to copy
+//      the report or open the FULL-PAGE dashboard.
+//
+// All the grading rules now live in analysis.js so the popup and the dashboard
+// stay perfectly in sync. This file is only about drawing to the screen.
+//
+// It never makes its own network request — it only reads what your browser
+// already received, so what you see is exactly what the site actually sent.
 
-// ---------------------------------------------------------------------------
-// STEP 0: Describe the headers we care about.
-// ---------------------------------------------------------------------------
-// This is a plain list. Each entry has:
-//   - name:  the exact header name to look for (case does not matter to us).
-//   - label: a friendly title to show the user.
-//   - desc:  a short, non-technical explanation of what it protects against.
-//   - grade: (optional) a function that inspects the header's VALUE and decides
-//            whether it's weak. Most headers are simply present-or-missing, so
-//            they don't need one — only CSP does, because a CSP can technically
-//            exist while still being loosely configured.
-// Adding or removing a header later is as easy as editing this list.
-const HEADERS = [
-  {
-    name: "content-security-policy",
-    label: "Content-Security-Policy (CSP)",
-    desc: "Controls what scripts, styles, and other content the page is allowed to load. Helps block cross-site scripting (XSS), where an attacker sneaks malicious code into a page.",
-    grade: gradeCsp, // defined below; flags loose policies as "weak".
-  },
-  {
-    name: "strict-transport-security",
-    label: "Strict-Transport-Security (HSTS)",
-    desc: "Tells the browser to always use secure HTTPS for this site. Protects against attackers who try to downgrade your connection to unencrypted HTTP to spy on it.",
-  },
-  {
-    name: "x-frame-options",
-    label: "X-Frame-Options",
-    desc: "Stops other websites from embedding this page inside a hidden frame. Defends against 'clickjacking', where you're tricked into clicking something you can't see.",
-  },
-  {
-    name: "x-content-type-options",
-    label: "X-Content-Type-Options",
-    desc: "Forces the browser to trust the declared file type instead of guessing. Prevents a file from being treated as something more dangerous than intended (MIME sniffing).",
-  },
-  {
-    name: "referrer-policy",
-    label: "Referrer-Policy",
-    desc: "Limits how much of the current address is shared when you click a link to another site. Protects your privacy by not leaking sensitive URLs.",
-  },
-  {
-    name: "permissions-policy",
-    label: "Permissions-Policy",
-    desc: "Controls which browser features (camera, microphone, location, etc.) the page and anything it embeds are allowed to use. Reduces what a compromised or malicious script can access.",
-  },
-];
+"use strict";
 
-// ---------------------------------------------------------------------------
-// CSP grading: is a Content-Security-Policy present but weak?
-// ---------------------------------------------------------------------------
-// A CSP is a set of rules like "script-src 'self'". Some values weaken it so
-// much that the protection is largely undone. This function scans the policy
-// text for those common weak spots and returns a list of human-readable
-// reasons. An empty list means "no weaknesses found".
-function gradeCsp(value) {
-  const v = value.toLowerCase();
-  const reasons = [];
+import {
+  storageKey,
+  indexHeaders,
+  analyze,
+  scoreOf,
+  sortForDisplay,
+  BADGE_TEXT,
+  buildReport,
+} from "./analysis.js";
 
-  // 'unsafe-inline' re-allows inline <script> tags — the exact thing CSP is
-  // meant to block. Its presence largely defeats XSS protection.
-  if (v.includes("'unsafe-inline'")) {
-    reasons.push("allows 'unsafe-inline' (inline scripts/styles can run)");
-  }
+// ===========================================================================
+// DRAWING THE UI
+// ===========================================================================
 
-  // 'unsafe-eval' re-enables eval() and similar, a common attack vector.
-  if (v.includes("'unsafe-eval'")) {
-    reasons.push("allows 'unsafe-eval' (dynamic code execution)");
-  }
+const els = {
+  overview: document.getElementById("overview"),
+  grade: document.getElementById("grade"),
+  site: document.getElementById("site"),
+  meta: document.getElementById("meta"),
+  results: document.getElementById("results"),
+  status: document.getElementById("status"),
+  actions: document.getElementById("actions"),
+  copy: document.getElementById("copy"),
+  open: document.getElementById("open"),
+};
 
-  // A bare "*" wildcard as a source lets content load from ANY site.
-  if (/(^|[\s;])(default-src|script-src)[^;]*\*/.test(v)) {
-    reasons.push("uses a '*' wildcard source (content can load from anywhere)");
-  }
+// Build one result card. Everything user-controlled is set with textContent,
+// so a hostile site can never inject code into the popup.
+function drawRow(result) {
+  const { def, status, values, notes } = result;
 
-  return reasons;
-}
-
-// Grab the page elements we'll be updating. We looked these up by their id.
-const siteEl = document.getElementById("site");
-const resultsEl = document.getElementById("results");
-const statusEl = document.getElementById("status");
-
-// ---------------------------------------------------------------------------
-// STEP 1: Find the active tab, then kick everything off.
-// ---------------------------------------------------------------------------
-// chrome.tabs.query is the browser telling us about open tabs. We ask only
-// for the one that is active in the current window — that's the site you're
-// looking at right now.
-chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-  const tab = tabs[0];
-  const url = tab && tab.url ? tab.url : "";
-
-  // We can only inspect normal web pages. Chrome's own pages (chrome://...),
-  // the extensions gallery, and blank tabs can't be fetched, so we bail early
-  // with a friendly message instead of showing a confusing error.
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    siteEl.textContent = url || "No active tab";
-    statusEl.textContent =
-      "This page can't be analyzed. Open a normal website (http or https) and try again.";
-    return;
-  }
-
-  siteEl.textContent = url;
-  analyze(url);
-});
-
-// ---------------------------------------------------------------------------
-// STEP 2: Fetch the site's headers and check each one.
-// ---------------------------------------------------------------------------
-async function analyze(url) {
-  try {
-    // We request the page ourselves. The "activeTab" permission gives us
-    // temporary access to the tab you just clicked from, which lets us read
-    // the full set of response headers (something ordinary web pages can't do)
-    // WITHOUT the extension holding standing access to every website.
-    //
-    // We try a "HEAD" request first: it asks the server for ONLY the headers,
-    // not the page body. That means we pull less data and never download a
-    // potentially large or hostile response body just to read its headers.
-    //
-    // - redirect "follow": if the site redirects (e.g. http -> https),
-    //   follow it so we check the page you actually end up on.
-    // - cache "no-store": don't use a saved copy; get the real, live headers.
-    const options = { redirect: "follow", cache: "no-store" };
-    let response = await fetch(url, { method: "HEAD", ...options });
-
-    // Some servers don't support HEAD and answer with an error. If that
-    // happens, fall back to a normal GET so the tool still works everywhere.
-    if (!response.ok) {
-      response = await fetch(url, { method: "GET", ...options });
-    }
-
-    // response.headers is a lookup table of everything the server sent back.
-    // For each header we care about, figure out three things:
-    //   - status: "missing", "present", or "weak"
-    //   - value:  what the server actually set it to (null if missing)
-    //   - note:   why it was graded weak (only for weak CSPs)
-    let presentCount = 0;
-
-    for (const header of HEADERS) {
-      // .get() returns the header's value, or null if it wasn't sent. Casing
-      // doesn't matter, which is why our names above are all lowercase.
-      const value = response.headers.get(header.name);
-
-      let status = "missing";
-      let note = "";
-
-      if (value !== null) {
-        presentCount++;
-        status = "present";
-
-        // If this header has a grading function (only CSP does), run it.
-        // Any reasons it returns mean the header is present but weak.
-        if (header.grade) {
-          const reasons = header.grade(value);
-          if (reasons.length > 0) {
-            status = "weak";
-            note = "Weak because it " + reasons.join("; ") + ".";
-          }
-        }
-      }
-
-      drawRow(header, status, value, note);
-    }
-
-    // A one-line summary at the bottom.
-    statusEl.textContent = `${presentCount} of ${HEADERS.length} security headers present.`;
-  } catch (error) {
-    // Network errors, sites that block extension requests, etc. land here.
-    statusEl.textContent =
-      "Couldn't read this site's headers (the site may block extra requests). Error: " +
-      error.message;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// STEP 3: Build one result card and add it to the popup.
-// ---------------------------------------------------------------------------
-// This function creates the little bordered box for a single header. It takes:
-//   - header: the entry from the HEADERS list (for its label and description).
-//   - status: "present" (green), "weak" (yellow), or "missing" (red).
-//   - value:  the header's actual value, or null if it's missing.
-//   - note:   an optional extra line, e.g. why a CSP was graded weak.
-function drawRow(header, status, value, note) {
-  // The wording shown on the badge for each status.
-  const badgeText = {
-    present: "PRESENT",
-    weak: "WEAK",
-    missing: "MISSING",
-  };
-
-  // The outer card.
   const li = document.createElement("li");
   li.className = "result";
 
-  // The top line: badge + header name.
   const head = document.createElement("div");
   head.className = "result-head";
 
-  // The badge's CSS class (present/weak/missing) matches the status directly,
-  // so the color follows automatically from popup.css.
   const badge = document.createElement("span");
   badge.className = "badge " + status;
-  badge.textContent = badgeText[status];
+  badge.textContent = BADGE_TEXT[status];
 
   const name = document.createElement("span");
-  name.textContent = header.label;
+  name.className = "result-name";
+  name.textContent = def.label;
 
   head.appendChild(badge);
   head.appendChild(name);
   li.appendChild(head);
 
-  // The plain-English explanation of what the header protects against.
   const desc = document.createElement("p");
   desc.className = "result-desc";
-  desc.textContent = header.desc;
+  desc.textContent = def.desc;
   li.appendChild(desc);
 
-  // If the header was actually sent, show its real value in a monospace box.
-  if (value !== null) {
+  if (values.length > 0) {
     const valueEl = document.createElement("p");
     valueEl.className = "result-value";
-    // Cap very long values so a site can't bloat the popup with a huge string.
-    // (textContent already blocks code injection; this just keeps it tidy.)
-    const MAX_LENGTH = 300;
-    valueEl.textContent =
-      value.length > MAX_LENGTH
-        ? value.slice(0, MAX_LENGTH) + "… (truncated)"
-        : value;
+    valueEl.textContent = values.join("\n");
     li.appendChild(valueEl);
   }
 
-  // If we graded it weak, explain why, right below the value.
-  if (note) {
-    const noteEl = document.createElement("p");
-    noteEl.className = "result-note";
-    noteEl.textContent = note;
-    li.appendChild(noteEl);
+  if (notes.length > 0) {
+    const list = document.createElement("ul");
+    list.className = "notes";
+    for (const note of notes) {
+      const item = document.createElement("li");
+      item.className = "note " + note.type;
+      item.textContent = note.text;
+      list.appendChild(item);
+    }
+    li.appendChild(list);
   }
 
-  // Drop the finished card into the results list.
-  resultsEl.appendChild(li);
+  if (def.learn) {
+    const link = document.createElement("a");
+    link.className = "learn-more";
+    link.href = def.learn;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Learn more ↗";
+    li.appendChild(link);
+  }
+
+  return li;
 }
+
+// Remove everything currently in an element.
+function clear(el) {
+  while (el.firstChild) el.removeChild(el.firstChild);
+}
+
+// ===========================================================================
+// THE THREE THINGS THE POPUP CAN SHOW
+// ===========================================================================
+
+// 1) A full report for a page we have data for.
+function renderReport(record, currentUrl, tabId) {
+  const headerMap = indexHeaders(record.headers);
+  const results = analyze(headerMap);
+  const score = scoreOf(results);
+  const presentCount = results.filter(
+    (r) => r.status === "present" || r.status === "covered"
+  ).length;
+
+  // Overall grade circle.
+  els.grade.textContent = score.letter;
+  els.grade.className = "grade grade-" + score.letter.toLowerCase();
+
+  // Which page these headers belong to.
+  els.site.textContent = record.url;
+
+  // A one-line summary.
+  const parts = [`HTTP ${record.statusCode}`];
+  if (record.fromCache) parts.push("from cache");
+  parts.push(`${presentCount} of ${results.length} headers in place`);
+  parts.push(`grade ${score.letter} (${score.pct}%)`);
+  els.meta.textContent = parts.join(" · ");
+  els.overview.hidden = false;
+
+  // If the tab's address no longer matches (e.g. a single-page app changed the
+  // URL without reloading), tell the user which page we actually measured.
+  if (currentUrl && !sameOrigin(currentUrl, record.url)) {
+    els.status.textContent = "Note: the tab has since navigated. These are the headers from the page shown above.";
+  } else {
+    els.status.textContent = "";
+  }
+
+  // The cards, problems first.
+  clear(els.results);
+  for (const result of sortForDisplay(results)) {
+    els.results.appendChild(drawRow(result));
+  }
+
+  // Wire up the Copy button.
+  els.copy.hidden = false;
+  els.copy.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(buildReport(record.url, results, score));
+      els.copy.textContent = "Copied!";
+      setTimeout(() => (els.copy.textContent = "Copy report"), 1500);
+    } catch (e) {
+      els.copy.textContent = "Copy failed";
+    }
+  };
+
+  // Wire up the "Open full audit" button. It opens dashboard.html in a new tab
+  // and tells it (via the URL) which tab's saved headers to load.
+  els.open.hidden = false;
+  els.open.onclick = () => {
+    const dashUrl =
+      chrome.runtime.getURL("dashboard.html") + `?tabId=${encodeURIComponent(tabId)}`;
+    chrome.tabs.create({ url: dashUrl });
+  };
+
+  els.actions.hidden = true;
+}
+
+// 2) We have no saved headers for this tab (page loaded before the extension
+//    was watching, or came from the back/forward cache). Offer to reload.
+function renderNoData(tabId) {
+  els.overview.hidden = true;
+  els.copy.hidden = true;
+  els.open.hidden = true;
+  clear(els.results);
+  els.status.textContent =
+    "No header data for this page yet. This happens when the page loaded before the extension was ready (for example, right after installing it). Reload the page to analyze it.";
+
+  clear(els.actions);
+  const button = document.createElement("button");
+  button.className = "primary-btn";
+  button.type = "button";
+  button.textContent = "Reload page & analyze";
+  button.onclick = () => {
+    button.disabled = true;
+    button.textContent = "Reloading…";
+    chrome.tabs.reload(tabId);
+    // When the reload finishes, the background worker saves fresh headers and
+    // our storage listener (below) redraws automatically.
+  };
+  els.actions.appendChild(button);
+  els.actions.hidden = false;
+}
+
+// 3) A page we can't analyze at all (chrome:// pages, the extensions gallery,
+//    blank tabs, local files, etc.).
+function renderUnsupported(url) {
+  els.overview.hidden = true;
+  els.copy.hidden = true;
+  els.open.hidden = true;
+  els.actions.hidden = true;
+  clear(els.results);
+  els.site.textContent = url || "No active tab";
+  els.status.textContent =
+    "This page can't be analyzed. Open a normal website (http or https) and try again.";
+}
+
+// Do two URLs share the same scheme + host + port?
+function sameOrigin(a, b) {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
+
+// ===========================================================================
+// STARTUP
+// ===========================================================================
+async function init() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab) {
+    renderUnsupported("");
+    return;
+  }
+
+  const tabId = tab.id;
+  const url = tab.url || "";
+
+  // We can only analyze real web pages.
+  if (!/^https?:/i.test(url)) {
+    renderUnsupported(url);
+    return;
+  }
+
+  // Draw whatever we have saved for this tab right now...
+  await load(tabId, url);
+
+  // ...and redraw if fresh headers arrive while the popup is open (e.g. after
+  // the user clicks Reload).
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "session" && changes[storageKey(tabId)]) {
+      load(tabId, url);
+    }
+  });
+}
+
+async function load(tabId, currentUrl) {
+  const key = storageKey(tabId);
+  const data = await chrome.storage.session.get(key);
+  const record = data[key];
+  if (record && record.headers) {
+    renderReport(record, currentUrl, tabId);
+  } else {
+    renderNoData(tabId);
+  }
+}
+
+init();

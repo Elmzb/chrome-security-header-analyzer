@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Security Audit</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <!-- Page header: title on the left, report actions on the right. -->
+  <header class="page-header">
+    <div class="page-title">
+      <span class="logo">🛡️</span>
+      <span>Security Audit Dashboard</span>
+    </div>
+    <div class="page-actions">
+      <button id="copy" class="ghost-btn" type="button" hidden>Copy report</button>
+    </div>
+  </header>
+
+  <!-- The hero: big overall grade + which page we audited + a summary line.
+       Hidden until we have data to show. -->
+  <section id="hero" class="hero" hidden>
+    <div id="grade" class="grade">–</div>
+    <div class="hero-text">
+      <p id="site" class="site"></p>
+      <p id="meta" class="meta"></p>
+    </div>
+  </section>
+
+  <!-- Main content. Each audit area (headers, cookies, CSP, TLS, tech-stack)
+       is its own <section> appended here by dashboard.js. -->
+  <main id="sections" class="sections"></main>
+
+  <!-- A status / message line for empty or error states. -->
+  <p id="status" class="status" role="status" aria-live="polite">Loading audit…</p>
+
+  <!-- Loaded as a module so it can import the shared analysis engine. -->
+  <script type="module" src="dashboard.js"></script>
+</body>
+</html>

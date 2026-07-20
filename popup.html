@@ -2,26 +2,45 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <!-- Load our styles and, at the end of the body, our logic. -->
+  <!-- Load our styles here; the logic (popup.js) loads at the end of the body. -->
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <h1>Security Header Analyzer</h1>
+  <!-- Top bar: the tool name, and buttons to copy a text report or open the
+       full-page dashboard. Both stay hidden until we have a report to show. -->
+  <header class="topbar">
+    <span class="topbar-title">Security Header Analyzer</span>
+    <div class="topbar-actions">
+      <button id="copy" class="ghost-btn" type="button" hidden>Copy report</button>
+      <button id="open" class="ghost-btn" type="button" hidden>Open full audit ↗</button>
+    </div>
+  </header>
 
-  <!-- Shows which site we're inspecting. Filled in by popup.js. -->
-  <p id="site" class="site">Checking current tab…</p>
+  <!-- Overview: the big letter grade + which page we looked at. Hidden until
+       we actually have a report to show. -->
+  <section id="overview" class="overview" hidden>
+    <div id="grade" class="grade">–</div>
+    <div class="overview-text">
+      <p id="site" class="site"></p>
+      <p id="meta" class="meta"></p>
+    </div>
+  </section>
 
-  <!-- The results list. popup.js builds a row here for each header. -->
+  <!-- The results list. popup.js builds one card here per header. -->
   <ul id="results" class="results"></ul>
 
-  <!-- A small footer note that can show errors or a summary. -->
-  <p id="status" class="status"></p>
+  <!-- A status / message line. "role=status" + "aria-live" means screen readers
+       announce updates here. -->
+  <p id="status" class="status" role="status" aria-live="polite">Reading headers…</p>
+
+  <!-- Action buttons (e.g. a Reload button when we have no data yet). -->
+  <div id="actions" class="actions" hidden></div>
 
   <!--
-    We load the script at the very END of the body so that all the
-    HTML elements above already exist by the time the script runs
-    and tries to find them.
+    Load the script as a MODULE (type="module") so it can `import` the shared
+    analysis engine from analysis.js. Modules also run after the page is parsed,
+    so every element above already exists when the script looks for it.
   -->
-  <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>

@@ -1,10 +1,9 @@
-/* ---------------------------------------------------------------------------
-   Colors are defined once here as "custom properties" (variables). The block
-   under @media (prefers-color-scheme: dark) swaps them for dark mode, so the
-   rest of the stylesheet doesn't need to know which theme is active.
---------------------------------------------------------------------------- */
+/* dashboard.css — styling for the full-page audit.
+   It reuses the same color-variable idea as popup.css (light + dark mode), but
+   lays things out for a wide browser tab instead of a narrow popup. */
+
 :root {
-  --bg: #ffffff;
+  --bg: #f4f5f7;
   --fg: #1a1a1a;
   --muted: #5a5a5a;
   --card-bg: #ffffff;
@@ -27,7 +26,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1e1f22;
+    --bg: #17181b;
     --fg: #ececec;
     --muted: #a0a0a0;
     --card-bg: #26272b;
@@ -49,91 +48,77 @@
   }
 }
 
-/* The popup is a small window, so we give it a fixed, comfortable width. */
+* { box-sizing: border-box; }
+
 body {
-  width: 380px;
   margin: 0;
-  padding: 0 0 12px;
+  padding: 0 0 48px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--fg);
   background: var(--bg);
 }
 
-/* ---- Top bar -------------------------------------------------------------- */
-.topbar {
+/* ---- Page header --------------------------------------------------------- */
+.page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: 12px;
+  padding: 16px 24px;
   border-bottom: 1px solid var(--card-border);
+  background: var(--card-bg);
   position: sticky;
   top: 0;
-  background: var(--bg);
-  z-index: 1;
+  z-index: 2;
 }
-
-.topbar-title {
-  font-size: 14px;
+.page-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
   font-weight: 700;
 }
+.page-title .logo { font-size: 20px; }
+.page-actions { display: flex; gap: 8px; }
 
-/* The group of buttons on the right of the top bar. */
-.topbar-actions {
-  display: flex;
-  gap: 8px;
-}
-
-/* ---- Buttons -------------------------------------------------------------- */
+/* ---- Buttons ------------------------------------------------------------- */
 .ghost-btn {
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--accent);
   background: transparent;
   border: 1px solid var(--card-border);
   border-radius: 6px;
-  padding: 4px 10px;
+  padding: 6px 12px;
   cursor: pointer;
 }
-.ghost-btn:hover {
-  border-color: var(--accent);
+.ghost-btn:hover { border-color: var(--accent); }
+
+/* ---- Everything below the header is centered in a readable column -------- */
+.hero,
+.sections,
+.status {
+  max-width: 900px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
-.primary-btn {
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  color: #ffffff;
-  background: var(--accent);
-  border: none;
-  border-radius: 8px;
-  padding: 10px 14px;
-  cursor: pointer;
-  width: 100%;
-}
-.primary-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-/* ---- Overview (grade + site) --------------------------------------------- */
-.overview {
+/* ---- Hero (grade + site) ------------------------------------------------- */
+.hero {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
+  gap: 20px;
+  padding: 28px 24px;
 }
-
-/* The big round letter grade. Its color comes from a grade-* class set in JS. */
 .grade {
   flex: 0 0 auto;
-  width: 56px;
-  height: 56px;
+  width: 84px;
+  height: 84px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 26px;
+  font-size: 40px;
   font-weight: 800;
   color: #ffffff;
   background: var(--muted);
@@ -144,52 +129,64 @@ body {
 .grade.grade-d { background: #d97706; }
 .grade.grade-f { background: #c0392b; }
 
-.overview-text {
-  min-width: 0; /* lets long URLs shrink/wrap instead of overflowing */
-}
-
+.hero-text { min-width: 0; }
 .site {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 600;
-  margin: 0 0 2px;
+  margin: 0 0 4px;
   word-break: break-all;
 }
-
 .meta {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   margin: 0;
 }
 
-/* ---- Results list --------------------------------------------------------- */
-.results {
-  list-style: none;
-  margin: 0;
-  padding: 0 16px;
+/* ---- Sections ------------------------------------------------------------ */
+.sections { padding: 0 24px; }
+
+.section {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+.section-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+.section-subtitle {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 14px;
 }
 
+/* ---- Header result cards (a responsive grid on wide screens) ------------- */
+.cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 12px;
+}
 .result {
   border: 1px solid var(--card-border);
   border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
+  padding: 12px 14px;
   background: var(--card-bg);
 }
-
 .result-head {
   display: flex;
   align-items: center;
   gap: 8px;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
 }
+.result-name { flex: 1; min-width: 0; }
 
-.result-name {
-  flex: 1;
-  min-width: 0;
-}
-
-/* The little colored status badge. */
 .badge {
   font-size: 10px;
   font-weight: 700;
@@ -204,13 +201,11 @@ body {
 .badge.missing { background: var(--missing-bg); color: var(--missing-fg); }
 
 .result-desc {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--muted);
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   line-height: 1.45;
 }
-
-/* The header's actual value, in monospace. Scrolls if a policy is very long. */
 .result-value {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
@@ -218,31 +213,21 @@ body {
   background: var(--value-bg);
   border-radius: 6px;
   padding: 6px 8px;
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   word-break: break-all;
   white-space: pre-wrap;
-  max-height: 120px;
+  max-height: 140px;
   overflow: auto;
 }
-
-/* Notes under a card: good (green), bad (red), or tip (grey). */
-.notes {
-  list-style: none;
-  margin: 6px 0 0;
-  padding: 0;
-}
+.notes { list-style: none; margin: 8px 0 0; padding: 0; }
 .note {
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.45;
   margin: 3px 0 0;
   padding-left: 16px;
   text-indent: -16px;
 }
-.note::before {
-  display: inline-block;
-  width: 16px;
-  text-indent: 0;
-}
+.note::before { display: inline-block; width: 16px; text-indent: 0; }
 .note.good { color: var(--good); }
 .note.good::before { content: "✓ "; }
 .note.bad { color: var(--bad); }
@@ -252,21 +237,17 @@ body {
 
 .learn-more {
   display: inline-block;
-  font-size: 11px;
-  margin-top: 8px;
+  font-size: 11.5px;
+  margin-top: 10px;
   color: var(--accent);
   text-decoration: none;
 }
 .learn-more:hover { text-decoration: underline; }
 
-/* ---- Status + actions ----------------------------------------------------- */
+/* ---- Status line --------------------------------------------------------- */
 .status {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
-  margin: 12px 16px 0;
-  line-height: 1.45;
-}
-
-.actions {
-  padding: 4px 16px 0;
+  padding: 0 24px;
+  line-height: 1.5;
 }

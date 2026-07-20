@@ -1,19 +1,50 @@
 {
   "manifest_version": 3,
   "name": "Security Header Analyzer",
-  "version": "1.0.0",
-  "description": "Checks the current website for important HTTP security headers and explains what each one protects against.",
+  "version": "2.0.0",
+  "description": "See the real HTTP security headers your browser received for the current page — with a letter grade, plain-English explanations, and specific fixes.",
+
+  "minimum_chrome_version": "108",
 
   "permissions": [
-    "activeTab"
+    "webRequest",
+    "storage"
   ],
+
+  "host_permissions": [
+    "<all_urls>"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
 
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   },
 
+  "commands": {
+    "reload-extension": {
+      "suggested_key": { "default": "Alt+Shift+R" },
+      "description": "Dev helper: reload this extension after editing its files"
+    }
+  },
+
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Analyze security headers"
+    "default_title": "Analyze security headers",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   }
 }
