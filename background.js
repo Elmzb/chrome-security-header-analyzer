@@ -46,6 +46,11 @@ function connKey(tabId) {
   return `conn:${tabId}`;
 }
 
+// What the consent auto-rejecter did on a tab lives under "consent:42".
+function consentKey(tabId) {
+  return `consent:${tabId}`;
+}
+
 // ---------------------------------------------------------------------------
 // Listen for the top-level page of every tab finishing its response headers.
 // ---------------------------------------------------------------------------
@@ -108,15 +113,35 @@ chrome.webRequest.onResponseStarted.addListener(
         capturedAt: Date.now(),
       },
     });
+    // A fresh page load starts with a clean slate: clear last page's consent
+    // record and the ✓ badge. The content script will re-set them if it acts.
+    chrome.storage.session.remove(consentKey(details.tabId));
+    chrome.action.setBadgeText({ tabId: details.tabId, text: "" });
   },
   { urls: ["<all_urls>"], types: ["main_frame"] }
 );
 
 // ---------------------------------------------------------------------------
+// Hear from the consent auto-rejecter (consent.js) when it rejects a banner.
+// ---------------------------------------------------------------------------
+// The content script can't write to chrome.storage.session (that's reserved for
+// trusted contexts), so it sends us a message instead. We record what happened
+// for the popup and light up a green ✓ badge on the toolbar icon.
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (!msg || msg.type !== "consentHandled" || !sender.tab) return;
+  const tabId = sender.tab.id;
+  chrome.storage.session.set({
+    [consentKey(tabId)]: { cmp: msg.cmp || "generic", url: sender.url || "", at: Date.now() },
+  });
+  chrome.action.setBadgeText({ tabId, text: "✓" });
+  chrome.action.setBadgeBackgroundColor({ tabId, color: "#16a34a" });
+});
+
+// ---------------------------------------------------------------------------
 // Tidy up: when a tab is closed, throw away anything we saved for it.
 // ---------------------------------------------------------------------------
 chrome.tabs.onRemoved.addListener((tabId) => {
-  chrome.storage.session.remove([storageKey(tabId), connKey(tabId)]);
+  chrome.storage.session.remove([storageKey(tabId), connKey(tabId), consentKey(tabId)]);
 });
 
 // ---------------------------------------------------------------------------

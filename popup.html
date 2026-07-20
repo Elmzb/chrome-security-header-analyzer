@@ -16,6 +16,16 @@
     </div>
   </header>
 
+  <!-- Shield control: auto-reject cookie banners, plus a line saying what the
+       auto-rejecter did on the current page. -->
+  <div class="prefs">
+    <label class="switch">
+      <input type="checkbox" id="autoReject" />
+      <span class="switch-label">Auto-reject cookie banners</span>
+    </label>
+    <p id="consentStatus" class="consent-status" hidden></p>
+  </div>
+
   <!-- Overview: the big letter grade + which page we looked at. Hidden until
        we actually have a report to show. -->
   <section id="overview" class="overview" hidden>

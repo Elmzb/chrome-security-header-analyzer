@@ -39,7 +39,40 @@ const els = {
   actions: document.getElementById("actions"),
   copy: document.getElementById("copy"),
   open: document.getElementById("open"),
+  autoReject: document.getElementById("autoReject"),
+  consentStatus: document.getElementById("consentStatus"),
 };
+
+// ===========================================================================
+// SHIELD: auto-reject cookie banners (the toggle + per-page status)
+// ===========================================================================
+async function setupConsentUI(tabId) {
+  // Reflect the saved on/off setting (stored in storage.local so the content
+  // script can read it too). Default ON.
+  const { autoReject = true } = await chrome.storage.local.get({ autoReject: true });
+  els.autoReject.checked = autoReject;
+  els.autoReject.onchange = () => {
+    chrome.storage.local.set({ autoReject: els.autoReject.checked });
+  };
+
+  // Show what the auto-rejecter did on this page, if anything.
+  const key = `consent:${tabId}`;
+  const showStatus = (record) => {
+    if (record && record.cmp) {
+      const via = record.cmp === "generic" ? "" : ` (${record.cmp})`;
+      els.consentStatus.textContent = `✓ Cookie banner auto-rejected${via}.`;
+      els.consentStatus.hidden = false;
+    } else {
+      els.consentStatus.hidden = true;
+    }
+  };
+  const data = await chrome.storage.session.get(key);
+  showStatus(data[key]);
+  // Update live if the banner is handled while the popup is open.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "session" && changes[key]) showStatus(changes[key].newValue);
+  });
+}
 
 // Build one result card. Everything user-controlled is set with textContent,
 // so a hostile site can never inject code into the popup.
@@ -232,6 +265,9 @@ async function init() {
 
   const tabId = tab.id;
   const url = tab.url || "";
+
+  // The shield toggle works on any page, so set it up regardless.
+  setupConsentUI(tabId);
 
   // We can only analyze real web pages.
   if (!/^https?:/i.test(url)) {

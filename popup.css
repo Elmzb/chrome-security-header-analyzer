@@ -124,6 +124,17 @@ body {
 .primary-btn:active { transform: translateY(1px); }
 .primary-btn:disabled { opacity: 0.6; cursor: default; filter: none; }
 
+/* ---- Shield preferences row ----------------------------------------------- */
+.prefs {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.switch { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.switch input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.switch-label { font-size: 12.5px; font-weight: 600; }
+.consent-status { font-size: 11px; color: var(--present-fg); margin: 6px 0 0; }
+
 /* ---- Overview (grade + site) --------------------------------------------- */
 .overview {
   display: flex;
