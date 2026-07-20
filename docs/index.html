@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Security Audit Dashboard — grade any website's security in one click</title>
+<style>
+  :root {
+    --bg: #f4f6fc;
+    --surface: #ffffff;
+    --surface-2: #f8f9ff;
+    --ink: #14172a;
+    --ink-soft: #565b7d;
+    --line: #e5e7f2;
+    --accent: #4f46e5;
+    --accent-2: #06b6d4;
+    --accent-soft: #eceefe;
+    --good: #12813c;  --good-bg: #e7f7ee;
+    --warn: #a4620a;  --warn-bg: #fbf1df;
+    --bad:  #c0392b;  --bad-bg:  #fdecec;
+    --shadow-sm: 0 1px 2px rgba(20,23,42,.06);
+    --shadow-md: 0 10px 30px rgba(20,23,42,.09);
+    --shadow-lg: 0 30px 60px rgba(20,23,42,.14);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #090d1b;
+      --surface: #141a2e;
+      --surface-2: #10152a;
+      --ink: #e9ecf7;
+      --ink-soft: #a4a9c8;
+      --line: #252b45;
+      --accent: #8b93ff;
+      --accent-2: #38cfe6;
+      --accent-soft: #191f3c;
+      --good: #63d38c;  --good-bg: #12331f;
+      --warn: #f0c66b;  --warn-bg: #392b10;
+      --bad:  #f28b82;  --bad-bg:  #3a1a1a;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+      --shadow-md: 0 14px 34px rgba(0,0,0,.45);
+      --shadow-lg: 0 34px 70px rgba(0,0,0,.55);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 17px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); }
+  h1, h2, h3, .brand { font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; letter-spacing: -.015em; text-wrap: balance; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---- Nav ---- */
+  nav { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 1.15rem; }
+  .brand .logo { font-size: 1.35rem; }
+  nav .links { display: flex; align-items: center; gap: 22px; font-size: .95rem; }
+  nav .links a { color: var(--ink-soft); text-decoration: none; }
+  nav .links a:hover { color: var(--ink); }
+  @media (max-width: 560px) { nav .links a.hide-sm { display: none; } }
+
+  /* ---- Buttons ---- */
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px; font: inherit; font-weight: 650;
+    font-size: .98rem; padding: 12px 20px; border-radius: 11px; cursor: pointer;
+    text-decoration: none; border: 1px solid transparent; transition: transform .06s, filter .15s, background .15s;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: var(--shadow-sm); }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.ghost { color: var(--ink); background: var(--surface); border-color: var(--line); }
+  .btn.ghost:hover { border-color: var(--accent); }
+
+  /* ---- Hero ---- */
+  .hero { padding: 40px 0 24px; display: grid; gap: 40px; align-items: center; }
+  @media (min-width: 860px) { .hero { grid-template-columns: 1fr 1fr; padding: 56px 0 40px; } }
+  .eyebrow {
+    display: inline-block; font-size: .74rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--accent); background: var(--accent-soft); padding: 6px 12px; border-radius: 999px;
+  }
+  .hero h1 { font-size: clamp(2.1rem, 5.2vw, 3.1rem); line-height: 1.06; margin: 18px 0 14px; }
+  .hero p.lead { font-size: 1.18rem; color: var(--ink-soft); margin: 0 0 26px; max-width: 42ch; }
+  .hero .cta { display: flex; flex-wrap: wrap; gap: 12px; }
+  .hero .tiny { margin: 16px 0 0; font-size: .88rem; color: var(--ink-soft); }
+
+  /* ---- Product mockup (a stylised preview built in HTML/CSS) ---- */
+  .shot {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: var(--shadow-lg); overflow: hidden; transform: rotate(-1deg);
+  }
+  .shot .titlebar { display: flex; align-items: center; gap: 7px; padding: 11px 14px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+  .shot .dot { width: 11px; height: 11px; border-radius: 50%; background: #d6d9e6; }
+  .shot .bar { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; font-weight: 700; font-size: .92rem; padding: 12px 16px; display: flex; align-items: center; gap: 8px; }
+  .shot .body { padding: 18px 16px; }
+  .shot .top { display: flex; align-items: center; gap: 15px; margin-bottom: 16px; }
+  .shot .grade {
+    flex: 0 0 auto; width: 66px; height: 66px; border-radius: 50%; display: grid; place-items: center;
+    font-family: ui-rounded, system-ui; font-size: 30px; font-weight: 800; color: #fff;
+    background: linear-gradient(135deg, #16a34a, #22c55e); box-shadow: 0 8px 22px rgba(34,197,94,.4);
+  }
+  .shot .site { font-weight: 700; font-size: .95rem; }
+  .shot .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .shot .chip { font-size: .68rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-soft); }
+  .shot .row { border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; margin-top: 9px; background: var(--surface-2); }
+  .shot .row .rh { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: .9rem; }
+  .badge { font-size: .62rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; }
+  .badge.good { background: var(--good-bg); color: var(--good); }
+  .badge.warn { background: var(--warn-bg); color: var(--warn); }
+  .badge.bad  { background: var(--bad-bg);  color: var(--bad); }
+  .shot .row p { margin: 6px 0 0; font-size: .78rem; color: var(--ink-soft); }
+
+  /* ---- Sections ---- */
+  section { padding: 46px 0; }
+  .section-head { text-align: center; max-width: 40ch; margin: 0 auto 34px; }
+  .section-head h2 { font-size: clamp(1.6rem, 3.5vw, 2.1rem); margin: 0 0 10px; }
+  .section-head p { color: var(--ink-soft); margin: 0; }
+
+  .features { display: grid; gap: 16px; grid-template-columns: 1fr; }
+  @media (min-width: 620px) { .features { grid-template-columns: 1fr 1fr; } }
+  @media (min-width: 900px) { .features { grid-template-columns: 1fr 1fr 1fr; } }
+  .feature { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 22px; box-shadow: var(--shadow-sm); }
+  .feature .ic { font-size: 1.5rem; }
+  .feature h3 { font-size: 1.08rem; margin: 12px 0 6px; }
+  .feature p { margin: 0; color: var(--ink-soft); font-size: .96rem; }
+
+  /* ---- Privacy strip ---- */
+  .privacy { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; border-radius: 20px; padding: 40px 32px; text-align: center; box-shadow: var(--shadow-md); }
+  .privacy h2 { font-size: clamp(1.5rem, 3.4vw, 2rem); margin: 0 0 10px; color: #fff; }
+  .privacy p { margin: 0 auto; max-width: 52ch; font-size: 1.08rem; opacity: .95; }
+
+  /* ---- Install ---- */
+  .steps { display: grid; gap: 16px; grid-template-columns: 1fr; max-width: 720px; margin: 0 auto; }
+  @media (min-width: 720px) { .steps { grid-template-columns: repeat(3, 1fr); } }
+  .step { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px; box-shadow: var(--shadow-sm); }
+  .step .n { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 800; font-family: ui-rounded, system-ui; }
+  .step h3 { font-size: 1.02rem; margin: 12px 0 6px; }
+  .step p { margin: 0; color: var(--ink-soft); font-size: .94rem; }
+  .step code { font-family: ui-monospace, Menlo, monospace; font-size: .82rem; background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+  .install-cta { text-align: center; margin-top: 30px; }
+
+  footer { border-top: 1px solid var(--line); padding: 32px 0 56px; color: var(--ink-soft); font-size: .92rem; }
+  footer .frow { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between; }
+  footer a { color: var(--ink-soft); text-decoration: none; }
+  footer a:hover { color: var(--accent); }
+
+  [class*="fade"] { animation: rise .5s ease both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <nav>
+    <div class="brand"><span class="logo">🛡️</span> Security Audit Dashboard</div>
+    <div class="links">
+      <a href="#features" class="hide-sm">Features</a>
+      <a href="#install" class="hide-sm">Install</a>
+      <a href="https://github.com/Elmzb/chrome-security-header-analyzer" class="btn ghost" style="padding:8px 14px">GitHub</a>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <header class="hero">
+    <div class="fade">
+      <span class="eyebrow">Free Chrome extension</span>
+      <h1>Know if a website is safe — in one click.</h1>
+      <p class="lead">It grades any site's security from A to F, explains every finding in plain English, and quietly blocks cookie pop-ups while you browse.</p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/Elmzb/chrome-security-header-analyzer">Get it on GitHub</a>
+        <a class="btn ghost" href="#features">See what it checks</a>
+      </div>
+      <p class="tiny">No account. No tracking. Nothing you visit ever leaves your computer.</p>
+    </div>
+
+    <!-- Stylised product preview (built in HTML/CSS, no image needed) -->
+    <div class="shot fade" aria-hidden="true">
+      <div class="titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+      <div class="bar">🛡️ Security Audit</div>
+      <div class="body">
+        <div class="top">
+          <div class="grade">A</div>
+          <div>
+            <div class="site">example.com</div>
+            <div class="chips">
+              <span class="chip">Headers: A</span>
+              <span class="chip">Transport: A</span>
+              <span class="chip">Cookies: B</span>
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="rh"><span class="badge good">Present</span> Content-Security-Policy</div>
+          <p>Strong, modern setup — blocks injected scripts.</p>
+        </div>
+        <div class="row">
+          <div class="rh"><span class="badge warn">Weak</span> Cookie: session_id</div>
+          <p>Missing HttpOnly — could be read by scripts.</p>
+        </div>
+        <div class="row">
+          <div class="rh"><span class="badge bad">Missing</span> Referrer-Policy</div>
+          <p>Not set — full URLs can leak to other sites.</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- FEATURES -->
+  <section id="features">
+    <div class="section-head">
+      <h2>Everything it checks, at a glance</h2>
+      <p>Five kinds of audit and one built-in shield — all in a single click.</p>
+    </div>
+    <div class="features">
+      <div class="feature fade"><div class="ic">🎓</div><h3>An A–F grade</h3><p>One clear letter for the whole site, with a breakdown showing exactly why.</p></div>
+      <div class="feature fade"><div class="ic">🧱</div><h3>Security headers</h3><p>Checks the hidden safety instructions a site sends, and grades each one.</p></div>
+      <div class="feature fade"><div class="ic">🍪</div><h3>Cookie safety</h3><p>Flags cookies missing key protections — without ever reading their contents.</p></div>
+      <div class="feature fade"><div class="ic">🔒</div><h3>Connection &amp; HTTPS</h3><p>Shows whether the connection is encrypted, the server, and HSTS status.</p></div>
+      <div class="feature fade"><div class="ic">🧩</div><h3>Tech detection</h3><p>Spots what a site is built with — WordPress, Shopify, Next.js and more.</p></div>
+      <div class="feature fade"><div class="ic">🛡️</div><h3>Cookie-banner shield</h3><p>Auto-rejects consent pop-ups on hundreds of sites, so you're not tracked.</p></div>
+    </div>
+  </section>
+
+  <!-- PRIVACY -->
+  <section>
+    <div class="privacy fade">
+      <h2>It reads. It never phones home.</h2>
+      <p>The extension only looks at what your browser <em>already</em> received for the page you're on. It makes no extra requests, and nothing about the sites you visit is ever sent anywhere.</p>
+    </div>
+  </section>
+
+  <!-- INSTALL -->
+  <section id="install">
+    <div class="section-head">
+      <h2>Install it in a minute</h2>
+      <p>It's free and open-source. Here's the quick way to add it today.</p>
+    </div>
+    <div class="steps">
+      <div class="step fade"><div class="n">1</div><h3>Download it</h3><p>On GitHub, click the green <strong>Code</strong> button → <strong>Download ZIP</strong>, then unzip it.</p></div>
+      <div class="step fade"><div class="n">2</div><h3>Open extensions</h3><p>Go to <code>chrome://extensions</code> and switch on <strong>Developer mode</strong> (top-right).</p></div>
+      <div class="step fade"><div class="n">3</div><h3>Load it</h3><p>Click <strong>Load unpacked</strong> and pick the unzipped folder. Pin the icon — done.</p></div>
+    </div>
+    <div class="install-cta">
+      <a class="btn primary" href="https://github.com/Elmzb/chrome-security-header-analyzer">Get it on GitHub</a>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <div class="wrap frow">
+    <div class="brand" style="font-size:1rem"><span class="logo">🛡️</span> Security Audit Dashboard</div>
+    <div>Built by Billy Elms · Open-source (MIT) · <a href="https://github.com/Elmzb/chrome-security-header-analyzer">View on GitHub</a></div>
+  </div>
+</footer>
+
+</body>
+</html>
