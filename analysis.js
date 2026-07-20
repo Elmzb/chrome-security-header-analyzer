@@ -338,6 +338,91 @@ export function letterFor(pct) {
 }
 
 // ===========================================================================
+// COOKIE SECURITY
+// ===========================================================================
+// chrome.cookies (called from the dashboard) hands us each cookie's flags.
+// This file only GRADES them — it never fetches or shows a cookie's value.
+// We check the three flags that matter:
+//   - Secure:   only send over HTTPS, so it can't be sniffed on the network.
+//   - HttpOnly: hidden from JavaScript, so an XSS bug can't read it.
+//   - SameSite: not sent on cross-site requests, which blunts CSRF.
+
+// chrome.cookies reports the SameSite flag as one of these strings.
+const SAMESITE_LABEL = {
+  no_restriction: "None",
+  lax: "Lax",
+  strict: "Strict",
+  unspecified: "not set",
+};
+
+// Grade a single cookie object (as returned by chrome.cookies).
+// pageIsHttps lets us avoid flagging a missing Secure flag on an http:// page,
+// where Secure wouldn't do anything anyway.
+export function gradeCookie(cookie, pageIsHttps = true) {
+  const notes = [];
+  let weak = false;
+
+  if (!cookie.secure) {
+    notes.push({
+      type: pageIsHttps ? "bad" : "tip",
+      text: "Missing Secure — the cookie can travel over unencrypted HTTP, where it can be intercepted.",
+    });
+    if (pageIsHttps) weak = true;
+  }
+
+  if (!cookie.httpOnly) {
+    notes.push({
+      type: "bad",
+      text: "Missing HttpOnly — JavaScript can read this cookie, so a cross-site scripting bug could steal it.",
+    });
+    weak = true;
+  }
+
+  const ss = cookie.sameSite || "unspecified";
+  if (ss === "no_restriction") {
+    notes.push({
+      type: "bad",
+      text: "SameSite=None — sent on cross-site requests, which enables CSRF unless that's genuinely required.",
+    });
+    weak = true;
+  } else if (ss === "unspecified") {
+    notes.push({
+      type: "tip",
+      text: "SameSite not set — browsers default to Lax, but setting it explicitly is clearer and safer.",
+    });
+  } else {
+    notes.push({
+      type: "good",
+      text: `SameSite=${SAMESITE_LABEL[ss]} — limits cross-site sending.`,
+    });
+  }
+
+  return {
+    name: cookie.name,
+    domain: cookie.domain,
+    status: weak ? "weak" : "present",
+    notes,
+  };
+}
+
+// Grade a whole list of cookies and produce a short summary.
+export function analyzeCookies(cookies, pageIsHttps = true) {
+  const results = cookies.map((c) => gradeCookie(c, pageIsHttps));
+  const summary = {
+    total: cookies.length,
+    missingSecure: cookies.filter((c) => !c.secure).length,
+    missingHttpOnly: cookies.filter((c) => !c.httpOnly).length,
+    weak: results.filter((r) => r.status === "weak").length,
+  };
+  // A simple 0–100 score: the share of cookies with no serious problems.
+  summary.pct = summary.total
+    ? Math.round(((summary.total - summary.weak) / summary.total) * 100)
+    : 100;
+  summary.letter = letterFor(summary.pct);
+  return { results, summary };
+}
+
+// ===========================================================================
 // SHARED DISPLAY HELPERS (still no DOM — just data about how to display)
 // ===========================================================================
 

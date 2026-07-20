@@ -20,6 +20,7 @@ import {
   sortForDisplay,
   BADGE_TEXT,
   buildReport,
+  analyzeCookies,
 } from "./analysis.js";
 
 const els = {
@@ -145,6 +146,94 @@ function renderHeadersSection(results) {
   body.appendChild(list);
 }
 
+// Build one cookie card. Like a header card, but for a single cookie. We show
+// its name and domain ONLY — never its value, which could be a session token.
+function cookieCard(result) {
+  const li = document.createElement("li");
+  li.className = "result";
+
+  const head = document.createElement("div");
+  head.className = "result-head";
+
+  const badge = document.createElement("span");
+  // Reuse the same badge colors: green for a healthy cookie, yellow for weak.
+  badge.className = "badge " + (result.status === "weak" ? "weak" : "present");
+  badge.textContent = result.status === "weak" ? "WEAK" : "OK";
+
+  const name = document.createElement("span");
+  name.className = "result-name";
+  name.textContent = result.name;
+
+  head.appendChild(badge);
+  head.appendChild(name);
+  li.appendChild(head);
+
+  const domain = document.createElement("p");
+  domain.className = "result-desc";
+  domain.textContent = "Domain: " + result.domain;
+  li.appendChild(domain);
+
+  if (result.notes.length) {
+    const list = document.createElement("ul");
+    list.className = "notes";
+    for (const note of result.notes) {
+      const item = document.createElement("li");
+      item.className = "note " + note.type;
+      item.textContent = note.text;
+      list.appendChild(item);
+    }
+    li.appendChild(list);
+  }
+
+  return li;
+}
+
+// Fetch the page's cookies (via the chrome.cookies API), grade them, and draw
+// a Cookies section. This is async because reading cookies is a browser call.
+async function renderCookiesSection(url) {
+  const pageIsHttps = /^https:/i.test(url);
+
+  let cookies;
+  try {
+    // getAll({ url }) returns exactly the cookies that apply to this page.
+    cookies = await chrome.cookies.getAll({ url });
+  } catch (e) {
+    const { body } = makeSection("Cookies", "Couldn't read cookies for this page.");
+    const p = document.createElement("p");
+    p.className = "result-desc";
+    p.textContent = String((e && e.message) || e);
+    body.appendChild(p);
+    return;
+  }
+
+  const { results, summary } = analyzeCookies(cookies, pageIsHttps);
+
+  // Build a summary line for the section subtitle.
+  const bits = [`${summary.total} cookie${summary.total === 1 ? "" : "s"}`];
+  if (summary.missingSecure) bits.push(`${summary.missingSecure} missing Secure`);
+  if (summary.missingHttpOnly) bits.push(`${summary.missingHttpOnly} missing HttpOnly`);
+  bits.push("values are never read or shown");
+
+  const { body } = makeSection("Cookies", bits.join(" · ") + ".");
+
+  if (summary.total === 0) {
+    const p = document.createElement("p");
+    p.className = "result-desc";
+    p.textContent = "No cookies are set for this page.";
+    body.appendChild(p);
+    return;
+  }
+
+  const list = document.createElement("ul");
+  list.className = "cards";
+  // Weak cookies first so problems are easy to spot.
+  const sorted = [...results].sort(
+    (a, b) => (a.status === "weak" ? 0 : 1) - (b.status === "weak" ? 0 : 1)
+  );
+  for (const result of sorted) list.appendChild(cookieCard(result));
+  body.appendChild(list);
+}
+
 // ---------------------------------------------------------------------------
 // The whole report
 // ---------------------------------------------------------------------------
@@ -187,6 +276,13 @@ function renderReport(record) {
   };
 }
 
+// Draw the whole report: headers first (instant), then cookies (needs an async
+// browser call, so it pops in a moment later, appended below the headers).
+async function renderAll(record) {
+  renderReport(record); // clears #sections, draws hero + Security Headers
+  await renderCookiesSection(record.url); // appends the Cookies section
+}
+
 function renderNoData() {
   els.hero.hidden = true;
   els.copy.hidden = true;
@@ -212,16 +308,16 @@ async function init() {
   const data = await chrome.storage.session.get(key);
   const record = data[key];
   if (record && record.headers) {
-    renderReport(record);
+    await renderAll(record);
   } else {
     renderNoData();
   }
 
   // If the audited tab reloads while this dashboard is open, refresh the report
-  // automatically with the new headers.
+  // automatically with the new headers (and re-check cookies).
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "session" && changes[key] && changes[key].newValue) {
-      renderReport(changes[key].newValue);
+      renderAll(changes[key].newValue);
     }
   });
 }
