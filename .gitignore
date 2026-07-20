@@ -8,6 +8,11 @@
 # Claude Code local settings (not part of the extension)
 .claude/
 
+# Python bytecode cache — Chrome REFUSES to load an extension containing any
+# file/folder starting with "_", so this must never live in the extension folder.
+__pycache__/
+*.pyc
+
 # Logs and OS clutter
 *.log
 Thumbs.db

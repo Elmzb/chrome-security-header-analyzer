@@ -17,15 +17,21 @@ Stop it with Ctrl+C. Change the port with:  PORT=6000 python3 dev-server.py
 """
 
 import os
+import sys
 import http.server
 import socketserver
+
+# IMPORTANT: never write a __pycache__ folder next to this script. Chrome refuses
+# to load an extension that contains any file/folder whose name starts with "_"
+# (they're reserved), so a stray __pycache__ would break "Load unpacked".
+sys.dont_write_bytecode = True
 
 EXT_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", "5599"))
 
 # Only these file types affect the extension; ignore everything else.
 WATCH_SUFFIXES = (".js", ".json", ".html", ".css")
-IGNORE_DIRS = {".git", "node_modules"}
+IGNORE_DIRS = {".git", "node_modules", "__pycache__"}
 
 
 def current_token():
