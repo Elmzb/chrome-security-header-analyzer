@@ -14,6 +14,7 @@
 
 import {
   storageKey,
+  connKey,
   indexHeaders,
   analyze,
   scoreOf,
@@ -22,6 +23,7 @@ import {
   buildReport,
   analyzeCookies,
   analyzeCsp,
+  analyzeTls,
 } from "./analysis.js";
 
 const els = {
@@ -133,6 +135,38 @@ function headerCard(result) {
 // ---------------------------------------------------------------------------
 // Sections
 // ---------------------------------------------------------------------------
+
+// Draw the connection / transport-security facts as a simple key–value list.
+function renderTlsSection(record, conn) {
+  const headerMap = indexHeaders(record.headers);
+  const hstsValues = headerMap.get("strict-transport-security") || [];
+  const { items } = analyzeTls(record.url, conn, hstsValues);
+
+  const { body } = makeSection(
+    "Connection & Transport Security",
+    "How this page was delivered. Certificate and cipher details aren't shown — Chrome doesn't expose them to extensions."
+  );
+
+  const list = document.createElement("ul");
+  list.className = "kv";
+  for (const item of items) {
+    const row = document.createElement("li");
+    row.className = "kv-row";
+
+    const label = document.createElement("span");
+    label.className = "kv-label";
+    label.textContent = item.label;
+
+    const value = document.createElement("span");
+    value.className = "kv-value " + item.level;
+    value.textContent = item.value;
+
+    row.appendChild(label);
+    row.appendChild(value);
+    list.appendChild(row);
+  }
+  body.appendChild(list);
+}
 
 function renderHeadersSection(results) {
   const { body } = makeSection(
@@ -313,7 +347,7 @@ function renderCspSection(cspValues) {
 // The whole report
 // ---------------------------------------------------------------------------
 
-function renderReport(record) {
+function renderReport(record, conn) {
   const headerMap = indexHeaders(record.headers);
   const results = analyze(headerMap);
   const score = scoreOf(results);
@@ -334,8 +368,10 @@ function renderReport(record) {
   els.hero.hidden = false;
   els.status.textContent = "";
 
-  // Sections.
+  // Sections. Transport security first (how the page arrived), then the
+  // headers, then the CSP breakdown.
   clear(els.sections);
+  renderTlsSection(record, conn);
   renderHeadersSection(results);
   renderCspSection(headerMap.get("content-security-policy") || []);
 
@@ -352,10 +388,11 @@ function renderReport(record) {
   };
 }
 
-// Draw the whole report: headers first (instant), then cookies (needs an async
-// browser call, so it pops in a moment later, appended below the headers).
-async function renderAll(record) {
-  renderReport(record); // clears #sections, draws hero + Security Headers
+// Draw the whole report: the synchronous sections first (transport, headers,
+// CSP), then cookies (needs an async browser call, so it pops in a moment
+// later, appended at the bottom).
+async function renderAll(record, conn) {
+  renderReport(record, conn); // clears #sections, draws hero + TLS + headers + CSP
   await renderCookiesSection(record.url); // appends the Cookies section
 }
 
@@ -381,19 +418,23 @@ async function init() {
   }
 
   const key = storageKey(tabId);
-  const data = await chrome.storage.session.get(key);
+  const ckey = connKey(tabId);
+  const data = await chrome.storage.session.get([key, ckey]);
   const record = data[key];
   if (record && record.headers) {
-    await renderAll(record);
+    await renderAll(record, data[ckey]);
   } else {
     renderNoData();
   }
 
   // If the audited tab reloads while this dashboard is open, refresh the report
-  // automatically with the new headers (and re-check cookies).
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "session" && changes[key] && changes[key].newValue) {
-      renderAll(changes[key].newValue);
+  // automatically with the new headers, connection info, and cookies.
+  chrome.storage.onChanged.addListener(async (changes, area) => {
+    if (area !== "session") return;
+    if (changes[key] && changes[key].newValue) {
+      // Re-read the latest connection record so it stays in sync.
+      const latest = await chrome.storage.session.get(ckey);
+      renderAll(changes[key].newValue, latest[ckey]);
     }
   });
 }

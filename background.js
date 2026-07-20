@@ -39,6 +39,13 @@ function storageKey(tabId) {
   return `headers:${tabId}`;
 }
 
+// Connection details (server IP + protocol) live under a separate key,
+// like "conn:42". Kept separate from headers so the two capture paths never
+// overwrite each other.
+function connKey(tabId) {
+  return `conn:${tabId}`;
+}
+
 // ---------------------------------------------------------------------------
 // Listen for the top-level page of every tab finishing its response headers.
 // ---------------------------------------------------------------------------
@@ -81,10 +88,35 @@ chrome.webRequest.onHeadersReceived.addListener(
 );
 
 // ---------------------------------------------------------------------------
+// Also record the CONNECTION details for the top-level page.
+// ---------------------------------------------------------------------------
+// "onResponseStarted" fires once the response begins, and — unlike
+// onHeadersReceived — it tells us:
+//   - details.ip:         the server's IP address the request actually hit
+//   - details.statusLine: e.g. "HTTP/1.1 200 OK", which reveals the protocol
+// Chrome does NOT expose TLS certificate or cipher details to extensions at
+// all, so those simply aren't available here — the dashboard says as much.
+chrome.webRequest.onResponseStarted.addListener(
+  (details) => {
+    if (details.tabId < 0) return;
+    chrome.storage.session.set({
+      [connKey(details.tabId)]: {
+        url: details.url,
+        ip: details.ip || null, // absent when served from cache
+        statusLine: details.statusLine || "",
+        fromCache: !!details.fromCache,
+        capturedAt: Date.now(),
+      },
+    });
+  },
+  { urls: ["<all_urls>"], types: ["main_frame"] }
+);
+
+// ---------------------------------------------------------------------------
 // Tidy up: when a tab is closed, throw away anything we saved for it.
 // ---------------------------------------------------------------------------
 chrome.tabs.onRemoved.addListener((tabId) => {
-  chrome.storage.session.remove(storageKey(tabId));
+  chrome.storage.session.remove([storageKey(tabId), connKey(tabId)]);
 });
 
 // ---------------------------------------------------------------------------

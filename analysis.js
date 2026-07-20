@@ -10,9 +10,9 @@
 // wants to use it loads its script with <script type="module"> and imports the
 // pieces it needs.
 
-// The session-storage key the background worker uses to save a tab's headers.
-// Must match the format in background.js.
+// The session-storage keys the background worker uses. Must match background.js.
 export const storageKey = (tabId) => `headers:${tabId}`;
+export const connKey = (tabId) => `conn:${tabId}`;
 
 // ===========================================================================
 // CSP PARSING + GRADING
@@ -583,6 +583,84 @@ export function analyzeCookies(cookies, pageIsHttps = true) {
     : 100;
   summary.letter = letterFor(summary.pct);
   return { results, summary };
+}
+
+// ===========================================================================
+// HTTPS / TRANSPORT SECURITY
+// ===========================================================================
+// Turn the URL, the connection record (ip + statusLine from onResponseStarted),
+// and the HSTS header into a list of plain-English facts. Each item has a
+// level: "good" | "bad" | "tip" | "info" that the dashboard colors.
+//
+// LIMITATION: Chrome does not expose the TLS certificate, its expiry, or the
+// cipher suite to extensions — so unlike a server-side scanner, we can't show
+// those. We only report what the browser makes available.
+export function analyzeTls(url, conn, hstsValues) {
+  const isHttps = /^https:/i.test(url);
+  const items = [];
+
+  // 1) Is the connection encrypted at all? This is the big one.
+  items.push({
+    label: "Connection",
+    value: isHttps ? "HTTPS — encrypted" : "HTTP — NOT encrypted",
+    level: isHttps ? "good" : "bad",
+  });
+  if (!isHttps) {
+    items.push({
+      label: "Warning",
+      value: "Loaded over plain HTTP — anyone on the network can read or modify this page.",
+      level: "bad",
+    });
+  }
+
+  // 2) HTTP protocol version, pulled from the status line ("HTTP/1.1 200 OK").
+  if (conn && conn.statusLine) {
+    const proto = (conn.statusLine.match(/^(HTTP\/[\d.]+)/i) || [])[1];
+    if (proto) items.push({ label: "Protocol", value: proto, level: "info" });
+  }
+
+  // 3) Server IP (absent when the page came from the browser cache).
+  if (conn && conn.ip) {
+    items.push({ label: "Server IP", value: conn.ip, level: "info" });
+  } else if (conn && conn.fromCache) {
+    items.push({ label: "Server IP", value: "Not available (served from cache)", level: "info" });
+  }
+
+  // 4) HSTS — is the browser told to always use HTTPS for this site?
+  const hsts = hstsValues && hstsValues.length ? hstsValues.join(", ").toLowerCase() : "";
+  if (hsts) {
+    const m = hsts.match(/max-age\s*=\s*(\d+)/);
+    const maxAge = m ? parseInt(m[1], 10) : 0;
+    const extras = [];
+    if (hsts.includes("includesubdomains")) extras.push("includeSubDomains");
+    if (hsts.includes("preload")) extras.push("preload");
+    const strong = maxAge >= 15768000; // 6 months
+    items.push({
+      label: "HSTS",
+      value:
+        `Enabled — max-age=${maxAge}` +
+        (extras.length ? ", " + extras.join(", ") : "") +
+        (strong ? "" : " (short; aim for ≥ 6 months)"),
+      level: strong ? "good" : "tip",
+    });
+  } else {
+    items.push({
+      label: "HSTS",
+      value: isHttps
+        ? "Not set — the browser isn't told to stick to HTTPS on future visits."
+        : "Not applicable over HTTP.",
+      level: isHttps ? "tip" : "info",
+    });
+  }
+
+  // 5) Be explicit about what we can't see.
+  items.push({
+    label: "Certificate / cipher",
+    value: "Not available — Chrome doesn't expose TLS certificate or cipher details to extensions.",
+    level: "info",
+  });
+
+  return { isHttps, items };
 }
 
 // ===========================================================================

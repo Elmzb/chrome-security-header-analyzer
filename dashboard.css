@@ -263,5 +263,15 @@ body {
 .learn-more { display: inline-block; font-size: 11.5px; font-weight: 600; margin-top: 11px; color: var(--accent); text-decoration: none; }
 .learn-more:hover { text-decoration: underline; }
 
+/* ---- Key–value list (Connection & Transport Security) --------------------- */
+.kv { list-style: none; margin: 0; padding: 0; display: grid; gap: 11px; }
+.kv-row { display: flex; align-items: baseline; gap: 14px; }
+.kv-label { flex: 0 0 150px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.kv-value { font-size: 13.5px; font-weight: 600; word-break: break-word; }
+.kv-value.good { color: var(--good); }
+.kv-value.bad  { color: var(--bad); }
+.kv-value.tip  { color: var(--weak-fg); }
+.kv-value.info { color: var(--fg); }
+
 /* ---- Status line ---------------------------------------------------------- */
 .status { font-size: 13px; color: var(--muted); padding: 0 24px; line-height: 1.5; }
