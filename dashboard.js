@@ -21,6 +21,7 @@ import {
   BADGE_TEXT,
   buildReport,
   analyzeCookies,
+  analyzeCsp,
 } from "./analysis.js";
 
 const els = {
@@ -234,6 +235,80 @@ async function renderCookiesSection(url) {
   body.appendChild(list);
 }
 
+// Build one CSP directive card: the directive name, what it controls, its
+// current sources, and per-directive notes.
+function cspDirectiveCard(d) {
+  const li = document.createElement("li");
+  li.className = "result";
+
+  const head = document.createElement("div");
+  head.className = "result-head";
+
+  const badge = document.createElement("span");
+  const cls = d.status === "weak" ? "weak" : d.status === "missing" ? "missing" : "present";
+  badge.className = "badge " + cls;
+  badge.textContent = d.status === "weak" ? "WEAK" : d.status === "missing" ? "MISSING" : "OK";
+
+  const name = document.createElement("span");
+  name.className = "result-name";
+  name.textContent = d.name;
+
+  head.appendChild(badge);
+  head.appendChild(name);
+  li.appendChild(head);
+
+  if (d.info) {
+    const info = document.createElement("p");
+    info.className = "result-desc";
+    info.textContent = d.info;
+    li.appendChild(info);
+  }
+
+  // Show the directive's current sources (its value), if any.
+  if (d.sources.length) {
+    const value = document.createElement("p");
+    value.className = "result-value";
+    value.textContent = d.sources.join(" ");
+    li.appendChild(value);
+  }
+
+  if (d.notes.length) {
+    const notes = document.createElement("ul");
+    notes.className = "notes";
+    for (const note of d.notes) {
+      const item = document.createElement("li");
+      item.className = "note " + note.type;
+      item.textContent = note.text;
+      notes.appendChild(item);
+    }
+    li.appendChild(notes);
+  }
+
+  return li;
+}
+
+// Draw the directive-by-directive CSP breakdown. Only shown when a CSP exists —
+// if there's no CSP, the Security Headers section already flags it as missing.
+function renderCspSection(cspValues) {
+  const { present, directives } = analyzeCsp(cspValues);
+  if (!present) return;
+
+  const weak = directives.filter((d) => d.status === "weak").length;
+  const missing = directives.filter((d) => d.status === "missing").length;
+  const bits = [`${directives.length} directives`];
+  if (weak) bits.push(`${weak} weak`);
+  if (missing) bits.push(`${missing} recommended but missing`);
+
+  const { body } = makeSection(
+    "Content-Security-Policy — directive by directive",
+    bits.join(" · ") + ". Each rule is graded on its own, problems first."
+  );
+  const list = document.createElement("ul");
+  list.className = "cards";
+  for (const d of directives) list.appendChild(cspDirectiveCard(d));
+  body.appendChild(list);
+}
+
 // ---------------------------------------------------------------------------
 // The whole report
 // ---------------------------------------------------------------------------
@@ -262,6 +337,7 @@ function renderReport(record) {
   // Sections.
   clear(els.sections);
   renderHeadersSection(results);
+  renderCspSection(headerMap.get("content-security-policy") || []);
 
   // Copy button.
   els.copy.hidden = false;

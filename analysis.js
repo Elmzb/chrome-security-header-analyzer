@@ -113,6 +113,169 @@ export function gradeCsp(values) {
 }
 
 // ===========================================================================
+// CSP — DIRECTIVE BY DIRECTIVE
+// ===========================================================================
+// gradeCsp (above) gives the WHOLE policy one pass/fail, used for the header
+// card and the score. analyzeCsp goes deeper: it grades each directive on its
+// own so the dashboard can show exactly which rule is strong or weak — and it
+// points out important directives the site forgot to set.
+
+// A one-line, plain-English description of what each directive controls.
+export const CSP_DIRECTIVE_INFO = {
+  "default-src": "The fallback rule for any resource type you didn't set explicitly.",
+  "script-src": "Which scripts the page may run — the single most important CSP rule.",
+  "object-src": "Legacy plugin content (<object>/<embed>). Best set to 'none'.",
+  "base-uri": "Restricts <base href>, so an injected tag can't re-point the page's relative links.",
+  "frame-ancestors": "Who may embed this page in a frame — clickjacking protection.",
+  "style-src": "Which stylesheets and inline styles may apply.",
+  "img-src": "Where images may load from.",
+  "connect-src": "Where fetch(), XHR, and WebSocket connections may go.",
+  "font-src": "Where web fonts may load from.",
+  "form-action": "Where forms on this page are allowed to submit.",
+  "frame-src": "Which pages may be loaded into frames on this page.",
+  "upgrade-insecure-requests": "Automatically upgrades insecure http subresource requests to https.",
+};
+
+// The directives important enough that we recommend adding them if missing.
+const CSP_RECOMMENDED = ["script-src", "object-src", "base-uri", "frame-ancestors"];
+
+// A source list is "broad" if it effectively allows content from anywhere.
+function hasBroadSource(sources) {
+  return sources.some((s) => ["*", "http:", "https:", "data:", "blob:"].includes(s));
+}
+function hasNonceOrHash(sources) {
+  return sources.some((s) => /^'(nonce-|sha(256|384|512)-)/.test(s));
+}
+
+// The strong checks used for script-src (and default-src acting as its fallback).
+function gradeScriptSources(sources) {
+  const notes = [];
+  let status = "present";
+  const strictDynamic = sources.includes("'strict-dynamic'");
+  const nonceHash = hasNonceOrHash(sources);
+
+  if (!strictDynamic) {
+    if (sources.includes("'unsafe-inline'") && !nonceHash) {
+      notes.push({ type: "bad", text: "'unsafe-inline' lets inline scripts run — the main thing CSP is meant to block." });
+      status = "weak";
+    }
+    if (hasBroadSource(sources)) {
+      notes.push({ type: "bad", text: "A broad source here lets scripts load from almost anywhere." });
+      status = "weak";
+    }
+  }
+  if (sources.includes("'unsafe-eval'")) {
+    notes.push({ type: "bad", text: "'unsafe-eval' allows running code from plain text strings." });
+    status = "weak";
+  }
+  if ((strictDynamic || nonceHash) && status !== "weak") {
+    notes.push({ type: "good", text: "Uses nonces/hashes or strict-dynamic — a strong, modern setup." });
+  }
+  return { status, notes };
+}
+
+// Grade a single directive that the site actually set.
+function gradeOneDirective(name, sources) {
+  const info = CSP_DIRECTIVE_INFO[name] || "";
+
+  if (name === "script-src") {
+    const g = gradeScriptSources(sources);
+    return { name, sources, status: g.status, notes: g.notes, info };
+  }
+  if (name === "default-src") {
+    const g = gradeScriptSources(sources);
+    g.notes.unshift({ type: "tip", text: "Also the fallback for any resource type without its own rule." });
+    return { name, sources, status: g.status, notes: g.notes, info };
+  }
+  if (name === "object-src") {
+    const ok = sources.includes("'none'");
+    return {
+      name, sources, status: ok ? "present" : "weak",
+      notes: [ok
+        ? { type: "good", text: "'none' blocks legacy plugin content." }
+        : { type: "bad", text: "Set this to 'none' to block <object>/<embed> plugin content." }],
+      info,
+    };
+  }
+  if (name === "base-uri") {
+    const restrictive = sources.includes("'none'") || sources.includes("'self'");
+    return {
+      name, sources, status: restrictive ? "present" : "weak",
+      notes: [restrictive
+        ? { type: "good", text: "Restricts <base>, so an injected tag can't re-point relative links." }
+        : { type: "tip", text: "Prefer 'none' or 'self' here." }],
+      info,
+    };
+  }
+  if (name === "frame-ancestors") {
+    const broad = sources.includes("*");
+    return {
+      name, sources, status: broad ? "weak" : "present",
+      notes: [broad
+        ? { type: "bad", text: "'*' lets any site frame this page — a clickjacking risk." }
+        : { type: "good", text: "Limits who can embed this page (clickjacking protection)." }],
+      info,
+    };
+  }
+  if (name === "upgrade-insecure-requests") {
+    return { name, sources, status: "present", notes: [{ type: "good", text: "Upgrades insecure http subresources to https." }], info };
+  }
+
+  // Any other directive: informational. Flag a broad wildcard as a light tip.
+  const notes = [];
+  if (hasBroadSource(sources)) {
+    notes.push({ type: "tip", text: "Uses a broad source — fine for public assets, tighten if it can hold sensitive data." });
+  }
+  return { name, sources, status: "present", notes, info };
+}
+
+// A suggestion string for a recommended directive the site is missing.
+function cspRecommendText(name) {
+  switch (name) {
+    case "script-src": return "No script-src or default-src — scripts could load from anywhere. Add one.";
+    case "object-src": return "Add \"object-src 'none'\" to block legacy plugin content.";
+    case "base-uri": return "Add \"base-uri 'none'\" so an injected <base> tag can't hijack links.";
+    case "frame-ancestors": return "Add frame-ancestors to control who can frame this page (clickjacking).";
+    default: return "Consider adding this directive.";
+  }
+}
+
+// Break a CSP into per-directive results (weak/missing first). Returns
+// { present:false } when there's no CSP at all (the header card already flags that).
+export function analyzeCsp(cspValues) {
+  if (!cspValues || !cspValues.length) return { present: false, directives: [] };
+
+  const map = parseCsp(cspValues.join("; ").toLowerCase());
+  const directives = [];
+  const seen = new Set();
+
+  // Grade each directive the site actually set.
+  for (const name of Object.keys(map)) {
+    seen.add(name);
+    directives.push(gradeOneDirective(name, map[name]));
+  }
+
+  // Recommend important directives that are missing.
+  for (const name of CSP_RECOMMENDED) {
+    if (seen.has(name)) continue;
+    // script-src is covered if default-src is present (it's the fallback).
+    if (name === "script-src" && map["default-src"]) continue;
+    directives.push({
+      name,
+      sources: [],
+      status: "missing",
+      notes: [{ type: "tip", text: cspRecommendText(name) }],
+      info: CSP_DIRECTIVE_INFO[name] || "",
+    });
+  }
+
+  // Problems first: weak, then missing, then the healthy ones.
+  const rank = { weak: 0, missing: 1, present: 2 };
+  directives.sort((a, b) => rank[a.status] - rank[b.status]);
+  return { present: true, directives };
+}
+
+// ===========================================================================
 // THE HEADERS WE CHECK
 // ===========================================================================
 // Each entry has:
