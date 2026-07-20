@@ -501,6 +501,37 @@ export function letterFor(pct) {
   return "F";
 }
 
+// A 0–100 score for how the page was delivered:
+//   HTTPS + long HSTS = 100, HTTPS + weak HSTS = 85, HTTPS only = 70, HTTP = 0.
+export function transportScore(url, hstsValues) {
+  if (!/^https:/i.test(url)) return 0;
+  const hsts = (hstsValues || []).join(", ").toLowerCase();
+  const m = hsts.match(/max-age\s*=\s*(\d+)/);
+  const maxAge = m ? parseInt(m[1], 10) : 0;
+  if (maxAge >= 15768000) return 100; // 6+ months
+  if (maxAge > 0) return 85;
+  return 70; // HTTPS but no (useful) HSTS
+}
+
+// Blend the three dimensions into one overall grade, and return the per-part
+// breakdown so the UI can show WHY. Weights: headers matter most.
+export function overallGrade({ headerPct, transportPct, cookiePct }) {
+  const parts = [
+    { label: "Headers", weight: 0.5, pct: headerPct },
+    { label: "Transport", weight: 0.2, pct: transportPct },
+    { label: "Cookies", weight: 0.3, pct: cookiePct },
+  ];
+  let total = 0;
+  let weightSum = 0;
+  for (const p of parts) {
+    p.letter = letterFor(p.pct);
+    total += p.pct * p.weight;
+    weightSum += p.weight;
+  }
+  const pct = Math.round(total / weightSum);
+  return { pct, letter: letterFor(pct), parts };
+}
+
 // ===========================================================================
 // COOKIE SECURITY
 // ===========================================================================
@@ -750,4 +781,156 @@ export function buildReport(url, results, score) {
     for (const n of r.notes) lines.push("    - " + n.text);
   }
   return lines.join("\n");
+}
+
+// ===========================================================================
+// FULL EXPORTABLE REPORT
+// ===========================================================================
+// The dashboard assembles a `data` object covering every section, then calls
+// one of these to turn it into text, JSON, or a standalone HTML file.
+//
+// data = {
+//   generatedAt, url, statusCode,
+//   overall:   { pct, letter, parts:[{label,pct,letter}] },
+//   transport: [ {label, value, level} ],
+//   headers:   [ {label, status, values, notes:[{type,text}]} ],
+//   csp:       { present, directives:[{name,status,sources,notes}] },
+//   cookies:   { summary, results:[{name,domain,status,notes}] },
+//   tech:      [ {name, category, evidence} ],
+// }
+
+// Escape text so it's safe to drop into the HTML report (values come from the
+// site, so never trust them as markup).
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// Plain-text version of the whole audit.
+export function reportToText(data) {
+  const L = [];
+  L.push("SECURITY AUDIT REPORT");
+  L.push(data.url);
+  L.push(`Generated: ${data.generatedAt}`);
+  L.push(`Overall grade: ${data.overall.letter} (${data.overall.pct}%)`);
+  L.push("  " + data.overall.parts.map((p) => `${p.label} ${p.letter} (${p.pct}%)`).join("  ·  "));
+  L.push("");
+
+  L.push("CONNECTION & TRANSPORT");
+  for (const it of data.transport) L.push(`  ${it.label}: ${it.value}`);
+  L.push("");
+
+  if (data.tech && data.tech.length) {
+    L.push("TECHNOLOGY");
+    for (const t of data.tech) L.push(`  ${t.name} — ${t.category} (via ${t.evidence})`);
+    L.push("");
+  }
+
+  L.push("SECURITY HEADERS");
+  for (const h of data.headers) {
+    L.push(`  [${BADGE_TEXT[h.status]}] ${h.label}`);
+    if (h.values && h.values.length) L.push("      " + h.values.join(" | "));
+    for (const n of h.notes) L.push("      - " + n.text);
+  }
+  L.push("");
+
+  if (data.csp && data.csp.present) {
+    L.push("CSP — DIRECTIVE BY DIRECTIVE");
+    for (const d of data.csp.directives) {
+      L.push(`  [${d.status.toUpperCase()}] ${d.name}${d.sources.length ? " " + d.sources.join(" ") : ""}`);
+      for (const n of d.notes) L.push("      - " + n.text);
+    }
+    L.push("");
+  }
+
+  L.push("COOKIES");
+  const cs = data.cookies.summary;
+  L.push(`  ${cs.total} total · ${cs.missingSecure} missing Secure · ${cs.missingHttpOnly} missing HttpOnly`);
+  for (const c of data.cookies.results) {
+    L.push(`  [${c.status === "weak" ? "WEAK" : "OK"}] ${c.name} (${c.domain})`);
+    for (const n of c.notes) L.push("      - " + n.text);
+  }
+  return L.join("\n");
+}
+
+// Machine-readable JSON version (pretty-printed).
+export function reportToJson(data) {
+  return JSON.stringify(data, null, 2);
+}
+
+// A self-contained HTML file (inline CSS, no external anything) you can open,
+// save, or print to PDF.
+export function reportToHtml(data) {
+  const badge = (status, text) =>
+    `<span class="b ${esc(status)}">${esc(text)}</span>`;
+  const notes = (ns) =>
+    ns && ns.length
+      ? `<ul class="n">${ns.map((n) => `<li class="${esc(n.type)}">${esc(n.text)}</li>`).join("")}</ul>`
+      : "";
+
+  const headerRows = data.headers
+    .map(
+      (h) => `<div class="card">${badge(h.status, BADGE_TEXT[h.status])} <b>${esc(h.label)}</b>
+      ${h.values && h.values.length ? `<pre>${esc(h.values.join("\n"))}</pre>` : ""}${notes(h.notes)}</div>`
+    )
+    .join("");
+
+  const cspRows =
+    data.csp && data.csp.present
+      ? data.csp.directives
+          .map(
+            (d) => `<div class="card">${badge(d.status, d.status.toUpperCase())} <b>${esc(d.name)}</b>
+        ${d.sources.length ? `<pre>${esc(d.sources.join(" "))}</pre>` : ""}${notes(d.notes)}</div>`
+          )
+          .join("")
+      : "<p>No Content-Security-Policy.</p>";
+
+  const cookieRows = data.cookies.results.length
+    ? data.cookies.results
+        .map(
+          (c) => `<div class="card">${badge(c.status === "weak" ? "weak" : "present", c.status === "weak" ? "WEAK" : "OK")} <b>${esc(c.name)}</b>
+        <div class="muted">${esc(c.domain)}</div>${notes(c.notes)}</div>`
+        )
+        .join("")
+    : "<p>No cookies set for this page.</p>";
+
+  const techRows = (data.tech || [])
+    .map((t) => `<div class="card"><b>${esc(t.name)}</b><div class="muted">${esc(t.category)} · via ${esc(t.evidence)}</div></div>`)
+    .join("");
+
+  const transportRows = data.transport
+    .map((it) => `<tr><td>${esc(it.label)}</td><td class="${esc(it.level)}">${esc(it.value)}</td></tr>`)
+    .join("");
+
+  const subgrades = data.overall.parts
+    .map((p) => `<span class="pill">${esc(p.label)}: <b>${esc(p.letter)}</b> (${p.pct}%)</span>`)
+    .join(" ");
+
+  return `<!doctype html><html><head><meta charset="utf-8">
+<title>Security Audit — ${esc(data.url)}</title>
+<style>
+  body{font:14px/1.5 system-ui,sans-serif;color:#1a1a1a;max-width:900px;margin:24px auto;padding:0 16px}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:28px 0 10px;border-bottom:1px solid #e5e5e5;padding-bottom:6px}
+  .grade{display:inline-flex;align-items:center;justify-content:center;width:64px;height:64px;border-radius:50%;color:#fff;font-size:30px;font-weight:800;background:#c0392b;vertical-align:middle;margin-right:12px}
+  .grade.A{background:#16a34a}.grade.B{background:#4d9a1e}.grade.C{background:#ca8a04}.grade.D{background:#ea580c}.grade.F{background:#c0392b}
+  .muted{color:#666;font-size:12px} .pill{display:inline-block;background:#f1f3f9;border-radius:999px;padding:2px 10px;margin:2px;font-size:12px}
+  .card{border:1px solid #e5e5e5;border-radius:8px;padding:10px 12px;margin:8px 0}
+  .b{font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;text-transform:uppercase}
+  .b.present,.b.covered{background:#e7f7ee;color:#12813c}.b.weak{background:#fdf3e0;color:#a76a00}.b.missing{background:#fdecec;color:#c0392b}
+  pre{background:#f5f5f5;border-radius:6px;padding:8px;white-space:pre-wrap;word-break:break-all;font-size:11px;margin:8px 0 0}
+  ul.n{margin:8px 0 0;padding-left:18px} ul.n li.bad{color:#c0392b} ul.n li.good{color:#12813c} ul.n li.tip{color:#666}
+  table{border-collapse:collapse;width:100%} td{padding:4px 8px;border-bottom:1px solid #eee} td.good{color:#12813c} td.bad{color:#c0392b} td.tip{color:#a76a00}
+</style></head><body>
+<h1><span class="grade ${esc(data.overall.letter)}">${esc(data.overall.letter)}</span>Security Audit</h1>
+<div class="muted">${esc(data.url)} · HTTP ${esc(data.statusCode)} · generated ${esc(data.generatedAt)}</div>
+<p>Overall: <b>${esc(data.overall.letter)}</b> (${data.overall.pct}%) &nbsp; ${subgrades}</p>
+<h2>Connection &amp; Transport Security</h2><table>${transportRows}</table>
+${techRows ? `<h2>Technology</h2>${techRows}` : ""}
+<h2>Security Headers</h2>${headerRows}
+<h2>Content-Security-Policy</h2>${cspRows}
+<h2>Cookies</h2><div class="muted">${data.cookies.summary.total} total · ${data.cookies.summary.missingSecure} missing Secure · ${data.cookies.summary.missingHttpOnly} missing HttpOnly · values never shown</div>${cookieRows}
+</body></html>`;
 }

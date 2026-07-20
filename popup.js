@@ -23,6 +23,9 @@ import {
   sortForDisplay,
   BADGE_TEXT,
   buildReport,
+  analyzeCookies,
+  transportScore,
+  overallGrade,
 } from "./analysis.js";
 
 // ===========================================================================
@@ -144,13 +147,26 @@ function clear(el) {
 // ===========================================================================
 
 // 1) A full report for a page we have data for.
-function renderReport(record, currentUrl, tabId) {
+async function renderReport(record, currentUrl, tabId) {
   const headerMap = indexHeaders(record.headers);
   const results = analyze(headerMap);
-  const score = scoreOf(results);
+  const headerScore = scoreOf(results);
   const presentCount = results.filter(
     (r) => r.status === "present" || r.status === "covered"
   ).length;
+
+  // Combined grade — same three dimensions the dashboard uses, so they agree.
+  let cookiePct = 100;
+  try {
+    const cookies = await chrome.cookies.getAll({ url: record.url });
+    cookiePct = analyzeCookies(cookies, /^https:/i.test(record.url)).summary.pct;
+  } catch (e) { /* cookies unavailable — treat as no penalty */ }
+  const hstsValues = headerMap.get("strict-transport-security") || [];
+  const score = overallGrade({
+    headerPct: headerScore.pct,
+    transportPct: transportScore(record.url, hstsValues),
+    cookiePct,
+  });
 
   // Overall grade circle.
   els.grade.textContent = score.letter;
@@ -163,7 +179,7 @@ function renderReport(record, currentUrl, tabId) {
   const parts = [`HTTP ${record.statusCode}`];
   if (record.fromCache) parts.push("from cache");
   parts.push(`${presentCount} of ${results.length} headers in place`);
-  parts.push(`grade ${score.letter} (${score.pct}%)`);
+  parts.push(`overall ${score.letter} (${score.pct}%)`);
   els.meta.textContent = parts.join(" · ");
   els.overview.hidden = false;
 
@@ -292,7 +308,7 @@ async function load(tabId, currentUrl) {
   const data = await chrome.storage.session.get(key);
   const record = data[key];
   if (record && record.headers) {
-    renderReport(record, currentUrl, tabId);
+    await renderReport(record, currentUrl, tabId);
   } else {
     renderNoData(tabId);
   }

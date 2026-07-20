@@ -21,12 +21,16 @@ import {
   scoreOf,
   sortForDisplay,
   BADGE_TEXT,
-  buildReport,
   analyzeCookies,
   analyzeCsp,
   analyzeTls,
   detectTechFromHeaders,
   mergeTech,
+  transportScore,
+  overallGrade,
+  reportToText,
+  reportToJson,
+  reportToHtml,
 } from "./analysis.js";
 
 const els = {
@@ -34,9 +38,12 @@ const els = {
   grade: document.getElementById("grade"),
   site: document.getElementById("site"),
   meta: document.getElementById("meta"),
+  subgrades: document.getElementById("subgrades"),
   sections: document.getElementById("sections"),
   status: document.getElementById("status"),
   copy: document.getElementById("copy"),
+  downloadHtml: document.getElementById("downloadHtml"),
+  downloadJson: document.getElementById("downloadJson"),
 };
 
 // Remove everything currently inside an element.
@@ -169,6 +176,7 @@ function renderTlsSection(record, conn) {
     list.appendChild(row);
   }
   body.appendChild(list);
+  return items;
 }
 
 function renderHeadersSection(results) {
@@ -226,27 +234,26 @@ function cookieCard(result) {
   return li;
 }
 
-// Fetch the page's cookies (via the chrome.cookies API), grade them, and draw
-// a Cookies section. This is async because reading cookies is a browser call.
-async function renderCookiesSection(url) {
-  const pageIsHttps = /^https:/i.test(url);
-
-  let cookies;
+// Read the page's cookies once (via the chrome.cookies API). Returns the graded
+// analysis, or null if we couldn't read them. Done up front so the overall
+// grade and the export can use it too.
+async function loadCookieAnalysis(url) {
   try {
-    // getAll({ url }) returns exactly the cookies that apply to this page.
-    cookies = await chrome.cookies.getAll({ url });
+    const cookies = await chrome.cookies.getAll({ url });
+    return analyzeCookies(cookies, /^https:/i.test(url));
   } catch (e) {
-    const { body } = makeSection("Cookies", "Couldn't read cookies for this page.");
-    const p = document.createElement("p");
-    p.className = "result-desc";
-    p.textContent = String((e && e.message) || e);
-    body.appendChild(p);
+    return null;
+  }
+}
+
+// Draw the Cookies section from an already-loaded analysis (sync).
+function renderCookiesSection(cookieAnalysis) {
+  if (!cookieAnalysis) {
+    makeSection("Cookies", "Couldn't read cookies for this page.");
     return;
   }
+  const { results, summary } = cookieAnalysis;
 
-  const { results, summary } = analyzeCookies(cookies, pageIsHttps);
-
-  // Build a summary line for the section subtitle.
   const bits = [`${summary.total} cookie${summary.total === 1 ? "" : "s"}`];
   if (summary.missingSecure) bits.push(`${summary.missingSecure} missing Secure`);
   if (summary.missingHttpOnly) bits.push(`${summary.missingHttpOnly} missing HttpOnly`);
@@ -272,20 +279,20 @@ async function renderCookiesSection(url) {
   body.appendChild(list);
 }
 
-// Fetch DOM-detected tech (from tech.js), combine with header-detected tech,
-// and draw a Technology section. Async because the DOM findings live in storage.
-async function renderTechSection(record, tabId) {
-  const headerMap = indexHeaders(record.headers);
-  const headerTech = detectTechFromHeaders(headerMap);
-
-  let domTech = [];
+// Read the DOM-detected tech (reported by tech.js) from storage.
+async function loadDomTech(tabId) {
   try {
     const data = await chrome.storage.session.get(techKey(tabId));
     const rec = data[techKey(tabId)];
-    if (rec && Array.isArray(rec.tech)) domTech = rec.tech;
+    if (rec && Array.isArray(rec.tech)) return rec.tech;
   } catch (e) {}
+  return [];
+}
 
-  const all = mergeTech(headerTech, domTech);
+// Draw a Technology section from header tech + already-loaded DOM tech (sync).
+// Returns the merged list so the export can include it.
+function renderTechSection(headerMap, domTech) {
+  const all = mergeTech(detectTechFromHeaders(headerMap), domTech);
   const { body } = makeSection(
     "Technology",
     all.length
@@ -293,7 +300,7 @@ async function renderTechSection(record, tabId) {
       : "Nothing recognised from headers or page markers (the site may hide these)."
   );
 
-  if (!all.length) return;
+  if (!all.length) return all;
 
   const list = document.createElement("ul");
   list.className = "cards";
@@ -317,6 +324,7 @@ async function renderTechSection(record, tabId) {
     list.appendChild(li);
   }
   body.appendChild(list);
+  return all;
 }
 
 // Build one CSP directive card: the directive name, what it controls, its
@@ -374,9 +382,10 @@ function cspDirectiveCard(d) {
 // Draw the directive-by-directive CSP breakdown. Only shown when a CSP exists —
 // if there's no CSP, the Security Headers section already flags it as missing.
 function renderCspSection(cspValues) {
-  const { present, directives } = analyzeCsp(cspValues);
-  if (!present) return;
+  const analysis = analyzeCsp(cspValues);
+  if (!analysis.present) return analysis;
 
+  const { directives } = analysis;
   const weak = directives.filter((d) => d.status === "weak").length;
   const missing = directives.filter((d) => d.status === "missing").length;
   const bits = [`${directives.length} directives`];
@@ -391,65 +400,133 @@ function renderCspSection(cspValues) {
   list.className = "cards";
   for (const d of directives) list.appendChild(cspDirectiveCard(d));
   body.appendChild(list);
+  return analysis;
 }
 
 // ---------------------------------------------------------------------------
 // The whole report
 // ---------------------------------------------------------------------------
 
-function renderReport(record, conn) {
+// Draw everything, using data that's ALL been loaded up front (cookies + tech),
+// so the combined grade and the export are complete and consistent.
+function renderReport(record, conn, cookieAnalysis, domTech) {
   const headerMap = indexHeaders(record.headers);
   const results = analyze(headerMap);
-  const score = scoreOf(results);
-  const presentCount = results.filter(
-    (r) => r.status === "present" || r.status === "covered"
-  ).length;
+  const headerScore = scoreOf(results);
+  const hstsValues = headerMap.get("strict-transport-security") || [];
 
-  // Hero: overall grade + which page + summary line.
-  els.grade.textContent = score.letter;
-  els.grade.className = "grade grade-" + score.letter.toLowerCase();
+  // --- The combined overall grade (Headers + Transport + Cookies) -----------
+  const cookiePct = cookieAnalysis ? cookieAnalysis.summary.pct : 100;
+  const overall = overallGrade({
+    headerPct: headerScore.pct,
+    transportPct: transportScore(record.url, hstsValues),
+    cookiePct,
+  });
+
+  // Hero: the big combined grade + which page + a one-line summary.
+  els.grade.textContent = overall.letter;
+  els.grade.className = "grade grade-" + overall.letter.toLowerCase();
   els.site.textContent = record.url;
 
-  const parts = [`HTTP ${record.statusCode}`];
-  if (record.fromCache) parts.push("from cache");
-  parts.push(`${presentCount} of ${results.length} headers in place`);
-  parts.push(`grade ${score.letter} (${score.pct}%)`);
-  els.meta.textContent = parts.join(" · ");
+  const metaBits = [`HTTP ${record.statusCode}`];
+  if (record.fromCache) metaBits.push("from cache");
+  metaBits.push(`overall ${overall.letter} (${overall.pct}%)`);
+  els.meta.textContent = metaBits.join(" · ");
+
+  // Per-dimension breakdown chips, so you see WHY the grade is what it is.
+  clear(els.subgrades);
+  for (const p of overall.parts) {
+    const pill = document.createElement("span");
+    pill.className = "subgrade grade-" + p.letter.toLowerCase();
+    pill.textContent = `${p.label}: ${p.letter} (${p.pct}%)`;
+    els.subgrades.appendChild(pill);
+  }
   els.hero.hidden = false;
   els.status.textContent = "";
 
-  // Sections. Transport security first (how the page arrived), then the
-  // headers, then the CSP breakdown.
+  // --- Sections (all synchronous now) ---------------------------------------
   clear(els.sections);
-  renderTlsSection(record, conn);
+  const transport = renderTlsSection(record, conn);
+  const tech = renderTechSection(headerMap, domTech) || [];
   renderHeadersSection(results);
-  renderCspSection(headerMap.get("content-security-policy") || []);
+  const csp = renderCspSection(headerMap.get("content-security-policy") || []);
+  renderCookiesSection(cookieAnalysis);
 
-  // Copy button.
+  // --- Assemble the exportable report data ----------------------------------
+  const reportData = {
+    generatedAt: new Date().toLocaleString(),
+    url: record.url,
+    statusCode: record.statusCode,
+    overall,
+    transport,
+    tech,
+    headers: results.map((r) => ({
+      label: r.def.label, status: r.status, values: r.values, notes: r.notes,
+    })),
+    csp: csp && csp.present ? { present: true, directives: csp.directives } : { present: false },
+    cookies: cookieAnalysis || { summary: { total: 0, missingSecure: 0, missingHttpOnly: 0 }, results: [] },
+  };
+  wireExportButtons(reportData);
+}
+
+// Hook up Copy / Download HTML / Download JSON to the current report data.
+function wireExportButtons(data) {
+  const host = safeHost(data.url);
+
   els.copy.hidden = false;
   els.copy.onclick = async () => {
     try {
-      await navigator.clipboard.writeText(buildReport(record.url, results, score));
-      els.copy.textContent = "Copied!";
-      setTimeout(() => (els.copy.textContent = "Copy report"), 1500);
+      await navigator.clipboard.writeText(reportToText(data));
+      flash(els.copy, "Copied!", "Copy report");
     } catch (e) {
-      els.copy.textContent = "Copy failed";
+      flash(els.copy, "Copy failed", "Copy report");
     }
   };
+
+  els.downloadHtml.hidden = false;
+  els.downloadHtml.onclick = () =>
+    downloadFile(`security-audit-${host}.html`, reportToHtml(data), "text/html");
+
+  els.downloadJson.hidden = false;
+  els.downloadJson.onclick = () =>
+    downloadFile(`security-audit-${host}.json`, reportToJson(data), "application/json");
 }
 
-// Draw the whole report: the synchronous sections first (transport, headers,
-// CSP), then cookies (needs an async browser call, so it pops in a moment
-// later, appended at the bottom).
+// Trigger a file download from a string, entirely in-browser.
+function downloadFile(filename, content, type) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function safeHost(url) {
+  try { return new URL(url).hostname || "site"; } catch { return "site"; }
+}
+
+function flash(btn, temp, back) {
+  btn.textContent = temp;
+  setTimeout(() => (btn.textContent = back), 1500);
+}
+
+// Load the async pieces (cookies + DOM tech) up front, then render everything.
 async function renderAll(record, conn, tabId) {
-  renderReport(record, conn); // clears #sections, draws hero + TLS + headers + CSP
-  await renderTechSection(record, tabId); // appends the Technology section
-  await renderCookiesSection(record.url); // appends the Cookies section
+  const [cookieAnalysis, domTech] = await Promise.all([
+    loadCookieAnalysis(record.url),
+    loadDomTech(tabId),
+  ]);
+  renderReport(record, conn, cookieAnalysis, domTech);
 }
 
 function renderNoData() {
   els.hero.hidden = true;
   els.copy.hidden = true;
+  els.downloadHtml.hidden = true;
+  els.downloadJson.hidden = true;
   clear(els.sections);
   els.status.textContent =
     "No saved audit data for that tab. Open the page you want to audit, click the extension icon, then use “Open full audit” from the popup.";
