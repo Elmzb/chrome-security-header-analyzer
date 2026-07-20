@@ -15,6 +15,7 @@
 import {
   storageKey,
   connKey,
+  techKey,
   indexHeaders,
   analyze,
   scoreOf,
@@ -24,6 +25,8 @@ import {
   analyzeCookies,
   analyzeCsp,
   analyzeTls,
+  detectTechFromHeaders,
+  mergeTech,
 } from "./analysis.js";
 
 const els = {
@@ -269,6 +272,53 @@ async function renderCookiesSection(url) {
   body.appendChild(list);
 }
 
+// Fetch DOM-detected tech (from tech.js), combine with header-detected tech,
+// and draw a Technology section. Async because the DOM findings live in storage.
+async function renderTechSection(record, tabId) {
+  const headerMap = indexHeaders(record.headers);
+  const headerTech = detectTechFromHeaders(headerMap);
+
+  let domTech = [];
+  try {
+    const data = await chrome.storage.session.get(techKey(tabId));
+    const rec = data[techKey(tabId)];
+    if (rec && Array.isArray(rec.tech)) domTech = rec.tech;
+  } catch (e) {}
+
+  const all = mergeTech(headerTech, domTech);
+  const { body } = makeSection(
+    "Technology",
+    all.length
+      ? `${all.length} detected from response headers and page markers.`
+      : "Nothing recognised from headers or page markers (the site may hide these)."
+  );
+
+  if (!all.length) return;
+
+  const list = document.createElement("ul");
+  list.className = "cards";
+  for (const tech of all) {
+    const li = document.createElement("li");
+    li.className = "result";
+
+    const head = document.createElement("div");
+    head.className = "result-head";
+    const name = document.createElement("span");
+    name.className = "result-name";
+    name.textContent = tech.name;
+    head.appendChild(name);
+    li.appendChild(head);
+
+    const desc = document.createElement("p");
+    desc.className = "result-desc";
+    desc.textContent = `${tech.category} · detected via ${tech.evidence}`;
+    li.appendChild(desc);
+
+    list.appendChild(li);
+  }
+  body.appendChild(list);
+}
+
 // Build one CSP directive card: the directive name, what it controls, its
 // current sources, and per-directive notes.
 function cspDirectiveCard(d) {
@@ -391,8 +441,9 @@ function renderReport(record, conn) {
 // Draw the whole report: the synchronous sections first (transport, headers,
 // CSP), then cookies (needs an async browser call, so it pops in a moment
 // later, appended at the bottom).
-async function renderAll(record, conn) {
+async function renderAll(record, conn, tabId) {
   renderReport(record, conn); // clears #sections, draws hero + TLS + headers + CSP
+  await renderTechSection(record, tabId); // appends the Technology section
   await renderCookiesSection(record.url); // appends the Cookies section
 }
 
@@ -419,22 +470,27 @@ async function init() {
 
   const key = storageKey(tabId);
   const ckey = connKey(tabId);
+  const tkey = techKey(tabId);
   const data = await chrome.storage.session.get([key, ckey]);
-  const record = data[key];
+  let record = data[key];
+  let conn = data[ckey];
   if (record && record.headers) {
-    await renderAll(record, data[ckey]);
+    await renderAll(record, conn, tabId);
   } else {
     renderNoData();
   }
 
-  // If the audited tab reloads while this dashboard is open, refresh the report
-  // automatically with the new headers, connection info, and cookies.
+  // If the audited tab reloads (new headers) or the tech-detector reports in
+  // after we drew, refresh the report so everything stays in sync.
   chrome.storage.onChanged.addListener(async (changes, area) => {
     if (area !== "session") return;
     if (changes[key] && changes[key].newValue) {
-      // Re-read the latest connection record so it stays in sync.
+      record = changes[key].newValue;
       const latest = await chrome.storage.session.get(ckey);
-      renderAll(changes[key].newValue, latest[ckey]);
+      conn = latest[ckey];
+      renderAll(record, conn, tabId);
+    } else if (changes[tkey] && record) {
+      renderAll(record, conn, tabId); // tech arrived after first render
     }
   });
 }

@@ -13,6 +13,7 @@
 // The session-storage keys the background worker uses. Must match background.js.
 export const storageKey = (tabId) => `headers:${tabId}`;
 export const connKey = (tabId) => `conn:${tabId}`;
+export const techKey = (tabId) => `tech:${tabId}`;
 
 // ===========================================================================
 // CSP PARSING + GRADING
@@ -661,6 +662,61 @@ export function analyzeTls(url, conn, hstsValues) {
   });
 
   return { isHttps, items };
+}
+
+// ===========================================================================
+// TECH-STACK DETECTION (from response headers)
+// ===========================================================================
+// Some response headers quietly reveal what a site is built with. This maps
+// those "fingerprint" headers to technologies. The page's DOM markers are
+// detected separately (in tech.js) and merged in by mergeTech() below.
+const TECH_HEADER_RULES = [
+  { header: "server", match: /nginx/i, name: "nginx", category: "Web server" },
+  { header: "server", match: /apache/i, name: "Apache", category: "Web server" },
+  { header: "server", match: /microsoft-iis/i, name: "IIS", category: "Web server" },
+  { header: "server", match: /litespeed/i, name: "LiteSpeed", category: "Web server" },
+  { header: "server", match: /cloudflare/i, name: "Cloudflare", category: "CDN" },
+  { header: "x-powered-by", match: /php/i, name: "PHP", category: "Language" },
+  { header: "x-powered-by", match: /asp\.net/i, name: "ASP.NET", category: "Framework" },
+  { header: "x-powered-by", match: /express/i, name: "Express", category: "Framework" },
+  { header: "x-powered-by", match: /next\.js/i, name: "Next.js", category: "Framework" },
+  { header: "x-powered-by", match: /wordpress|w3 total cache/i, name: "WordPress", category: "CMS" },
+  { header: "x-aspnet-version", match: /.+/, name: "ASP.NET", category: "Framework" },
+  { header: "x-generator", match: /drupal/i, name: "Drupal", category: "CMS" },
+  { header: "x-drupal-cache", match: /.+/, name: "Drupal", category: "CMS" },
+  { header: "x-shopify-stage", match: /.+/, name: "Shopify", category: "E-commerce" },
+  { header: "cf-ray", match: /.+/, name: "Cloudflare", category: "CDN" },
+  { header: "x-served-by", match: /cache|fastly/i, name: "Fastly", category: "CDN" },
+  { header: "x-vercel-id", match: /.+/, name: "Vercel", category: "Hosting" },
+  { header: "via", match: /varnish/i, name: "Varnish", category: "Cache" },
+];
+
+export function detectTechFromHeaders(headerMap) {
+  const found = [];
+  for (const rule of TECH_HEADER_RULES) {
+    const values = headerMap.get(rule.header);
+    if (values && rule.match.test(values.join(", "))) {
+      found.push({ name: rule.name, category: rule.category, evidence: `${rule.header} header` });
+    }
+  }
+  return found;
+}
+
+// Merge header-derived and DOM-derived tech lists, removing duplicates by name
+// (case-insensitive). The first mention of a name wins its category/evidence.
+export function mergeTech(...lists) {
+  const byName = new Map();
+  for (const list of lists) {
+    for (const item of list || []) {
+      const key = item.name.toLowerCase();
+      if (!byName.has(key)) byName.set(key, item);
+    }
+  }
+  return [...byName.values()].sort((a, b) =>
+    a.category === b.category
+      ? a.name.localeCompare(b.name)
+      : a.category.localeCompare(b.category)
+  );
 }
 
 // ===========================================================================

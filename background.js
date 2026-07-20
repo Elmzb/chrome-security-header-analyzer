@@ -34,6 +34,22 @@ const RELEVANT_HEADERS = new Set([
   "cross-origin-resource-policy",
 ]);
 
+// Non-sensitive "fingerprint" headers that reveal the tech stack (web server,
+// language, CDN, CMS). We capture these too so the dashboard can identify what
+// the site is built with. None of these contain personal data.
+const FINGERPRINT_HEADERS = new Set([
+  "server",
+  "x-powered-by",
+  "x-aspnet-version",
+  "x-generator",
+  "x-drupal-cache",
+  "x-shopify-stage",
+  "cf-ray",
+  "x-served-by",
+  "x-vercel-id",
+  "via",
+]);
+
 // We store one record per tab, under a key like "headers:42".
 function storageKey(tabId) {
   return `headers:${tabId}`;
@@ -49,6 +65,11 @@ function connKey(tabId) {
 // What the consent auto-rejecter did on a tab lives under "consent:42".
 function consentKey(tabId) {
   return `consent:${tabId}`;
+}
+
+// Technologies detected from the page's DOM live under "tech:42".
+function techKey(tabId) {
+  return `tech:${tabId}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,7 +92,10 @@ chrome.webRequest.onHeadersReceived.addListener(
     // Keep only the security headers we understand. Everything else is dropped
     // on the floor and never stored.
     const headers = (details.responseHeaders || [])
-      .filter((h) => RELEVANT_HEADERS.has(h.name.toLowerCase()))
+      .filter((h) => {
+        const n = h.name.toLowerCase();
+        return RELEVANT_HEADERS.has(n) || FINGERPRINT_HEADERS.has(n);
+      })
       .map((h) => ({ name: h.name, value: h.value || "" }));
 
     const record = {
@@ -128,20 +152,37 @@ chrome.webRequest.onResponseStarted.addListener(
 // trusted contexts), so it sends us a message instead. We record what happened
 // for the popup and light up a green ✓ badge on the toolbar icon.
 chrome.runtime.onMessage.addListener((msg, sender) => {
-  if (!msg || msg.type !== "consentHandled" || !sender.tab) return;
+  if (!msg || !sender.tab) return;
   const tabId = sender.tab.id;
-  chrome.storage.session.set({
-    [consentKey(tabId)]: { cmp: msg.cmp || "generic", url: sender.url || "", at: Date.now() },
-  });
-  chrome.action.setBadgeText({ tabId, text: "✓" });
-  chrome.action.setBadgeBackgroundColor({ tabId, color: "#16a34a" });
+
+  // The consent auto-rejecter handled a banner.
+  if (msg.type === "consentHandled") {
+    chrome.storage.session.set({
+      [consentKey(tabId)]: { cmp: msg.cmp || "generic", url: sender.url || "", at: Date.now() },
+    });
+    chrome.action.setBadgeText({ tabId, text: "✓" });
+    chrome.action.setBadgeBackgroundColor({ tabId, color: "#16a34a" });
+    return;
+  }
+
+  // The tech-detector (tech.js) reported technologies found in the page's DOM.
+  if (msg.type === "techDetected" && Array.isArray(msg.tech)) {
+    chrome.storage.session.set({
+      [techKey(tabId)]: { tech: msg.tech, url: sender.url || "", at: Date.now() },
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
 // Tidy up: when a tab is closed, throw away anything we saved for it.
 // ---------------------------------------------------------------------------
 chrome.tabs.onRemoved.addListener((tabId) => {
-  chrome.storage.session.remove([storageKey(tabId), connKey(tabId), consentKey(tabId)]);
+  chrome.storage.session.remove([
+    storageKey(tabId),
+    connKey(tabId),
+    consentKey(tabId),
+    techKey(tabId),
+  ]);
 });
 
 // ---------------------------------------------------------------------------
